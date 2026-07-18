@@ -3,20 +3,31 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Kee — Cognitive Software Asset Intelligence System API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: projects
+    description: Software project management and analysis
+  - name: analyses
+    description: AI Council analysis results
+  - name: vault
+    description: Master Vault entries
+  - name: audit
+    description: Change audit log
+  - name: tasks
+    description: Autonomous task queue
+  - name: dashboard
+    description: Dashboard and companion data
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +35,441 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List all projects ranked by value score
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Add a new project for analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{id}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: Get a project by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      summary: Update project metadata or scores
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /projects/{id}/analyze:
+    post:
+      operationId: analyzeProject
+      tags: [projects]
+      summary: Trigger AI Council analysis on a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+      responses:
+        "202":
+          description: Analysis queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  /projects/{id}/analyses:
+    get:
+      operationId: getProjectAnalyses
+      tags: [analyses]
+      summary: Get all AI Council analyses for a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Analyses by council role
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Analysis"
+
+  /projects/{id}/relationships:
+    get:
+      operationId: getProjectRelationships
+      tags: [projects]
+      summary: Get relationship graph for a project (merges, splits, evolution)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project relationships
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRelationships"
+
+  /analyses/{id}/approve:
+    post:
+      operationId: approveAnalysis
+      tags: [analyses]
+      summary: Governor approves or rejects an analysis finding
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernorVerdict"
+      responses:
+        "200":
+          description: Updated analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Analysis"
+
+  /vault:
+    get:
+      operationId: listVaultEntries
+      tags: [vault]
+      summary: List all Master Vault entries
+      parameters:
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Vault entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VaultEntry"
+    post:
+      operationId: createVaultEntry
+      tags: [vault]
+      summary: Add a new entry to the Master Vault
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultEntryInput"
+      responses:
+        "201":
+          description: Created vault entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+
+  /vault/{id}:
+    get:
+      operationId: getVaultEntry
+      tags: [vault]
+      summary: Get a vault entry by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Vault entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+    patch:
+      operationId: updateVaultEntry
+      tags: [vault]
+      summary: Update a vault entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VaultEntryUpdate"
+      responses:
+        "200":
+          description: Updated vault entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+    delete:
+      operationId: deleteVaultEntry
+      tags: [vault]
+      summary: Delete a vault entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /audit:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      summary: List all audit log entries
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: approvalStatus
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
+
+  /audit/{id}/approve:
+    post:
+      operationId: approveAuditLog
+      tags: [audit]
+      summary: Approve or reject an audit log entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditApproval"
+      responses:
+        "200":
+          description: Updated audit log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLog"
+
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      summary: List all queued and completed tasks
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [queued, running, completed, failed, awaiting_approval]
+      responses:
+        "200":
+          description: Task list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+    post:
+      operationId: createTask
+      tags: [tasks]
+      summary: Queue a new autonomous task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskInput"
+      responses:
+        "201":
+          description: Created task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  /tasks/{id}/approve:
+    post:
+      operationId: approveTask
+      tags: [tasks]
+      summary: Approve or reject a task awaiting approval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskApproval"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get portfolio summary stats for the dashboard
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/companion:
+    get:
+      operationId: getDailyCompanion
+      tags: [dashboard]
+      summary: Get daily companion data — greetings, activity since last visit, idea prompts
+      responses:
+        "200":
+          description: Daily companion data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyCompanion"
+
+  /dashboard/activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent activity feed across all projects
+      responses:
+        "200":
+          description: Recent activity items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +480,365 @@ components:
       required:
         - status
 
+    Project:
+      type: object
+      required: [id, name, status, analysisMode, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        repoUrl:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        inferredDescription:
+          type: ["string", "null"]
+        primaryLanguage:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, analyzing, analyzed, ready_for_market]
+        analysisMode:
+          type: string
+          enum: [blind, documented]
+        valueScore:
+          type: ["integer", "null"]
+        readinessScore:
+          type: ["integer", "null"]
+        opportunityScore:
+          type: ["integer", "null"]
+        estimatedBuildCost:
+          type: ["integer", "null"]
+        estimatedMarketValue:
+          type: ["integer", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProjectInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        repoUrl:
+          type: string
+        description:
+          type: string
+        analysisMode:
+          type: string
+          enum: [blind, documented]
+          default: blind
+        tags:
+          type: array
+          items:
+            type: string
+
+    ProjectUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        repoUrl:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, analyzing, analyzed, ready_for_market]
+        valueScore:
+          type: integer
+        readinessScore:
+          type: integer
+        opportunityScore:
+          type: integer
+        estimatedBuildCost:
+          type: integer
+        estimatedMarketValue:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+
+    AnalyzeRequest:
+      type: object
+      properties:
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [researcher, engineering_reviewer, product_analyst, documentation_specialist, market_evaluator, governor]
+          description: Specific council roles to invoke. Defaults to all roles.
+        blind:
+          type: boolean
+          description: Force blind scan mode ignoring any documentation
+
+    Analysis:
+      type: object
+      required: [id, projectId, role, content, confidenceLevel, governorStatus, createdAt]
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: integer
+        role:
+          type: string
+          enum: [researcher, engineering_reviewer, product_analyst, documentation_specialist, market_evaluator, governor]
+        content:
+          type: string
+        confidenceLevel:
+          type: string
+          enum: [confirmed, inferred, unknown]
+        governorStatus:
+          type: string
+          enum: [pending, approved, rejected]
+        governorNote:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    GovernorVerdict:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [approved, rejected]
+        note:
+          type: string
+
+    ProjectRelationships:
+      type: object
+      required: [projectId, relationships]
+      properties:
+        projectId:
+          type: integer
+        relationships:
+          type: array
+          items:
+            type: object
+            required: [relatedProjectId, relationType]
+            properties:
+              relatedProjectId:
+                type: integer
+              relatedProjectName:
+                type: string
+              relationType:
+                type: string
+                enum: [merged_from, split_from, forked_from, evolved_into, depends_on]
+
+    VaultEntry:
+      type: object
+      required: [id, title, content, entryType, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        content:
+          type: string
+        entryType:
+          type: string
+          enum: [note, document, conversation, idea, decision]
+        tags:
+          type: array
+          items:
+            type: string
+        linkedProjectId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    VaultEntryInput:
+      type: object
+      required: [title, content]
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        entryType:
+          type: string
+          enum: [note, document, conversation, idea, decision]
+          default: note
+        tags:
+          type: array
+          items:
+            type: string
+        linkedProjectId:
+          type: integer
+
+    VaultEntryUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        entryType:
+          type: string
+          enum: [note, document, conversation, idea, decision]
+        tags:
+          type: array
+          items:
+            type: string
+        linkedProjectId:
+          type: ["integer", "null"]
+
+    AuditLog:
+      type: object
+      required: [id, action, agent, approvalStatus, createdAt]
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: ["integer", "null"]
+        action:
+          type: string
+        before:
+          type: ["string", "null"]
+        after:
+          type: ["string", "null"]
+        reason:
+          type: string
+        agent:
+          type: string
+          enum: [researcher, engineering_reviewer, product_analyst, documentation_specialist, market_evaluator, governor, system]
+        approvalStatus:
+          type: string
+          enum: [pending, approved, rejected]
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditApproval:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [approved, rejected]
+
+    Task:
+      type: object
+      required: [id, title, status, createdAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [queued, running, completed, failed, awaiting_approval]
+        projectId:
+          type: ["integer", "null"]
+        result:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: ["string", "null"]
+
+    TaskInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        projectId:
+          type: integer
+
+    TaskApproval:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+        note:
+          type: string
+
+    DashboardSummary:
+      type: object
+      required: [totalProjects, analyzedProjects, pendingTasks, vaultEntries, topProjects, totalEstimatedValue]
+      properties:
+        totalProjects:
+          type: integer
+        analyzedProjects:
+          type: integer
+        pendingTasks:
+          type: integer
+        vaultEntries:
+          type: integer
+        totalEstimatedValue:
+          type: integer
+        avgValueScore:
+          type: ["number", "null"]
+        avgReadinessScore:
+          type: ["number", "null"]
+        topProjects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        statusBreakdown:
+          type: object
+          additionalProperties:
+            type: integer
+
+    DailyCompanion:
+      type: object
+      required: [greeting, date, recentActivity, ideaPrompts]
+      properties:
+        greeting:
+          type: string
+        date:
+          type: string
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+        ideaPrompts:
+          type: array
+          items:
+            type: string
+        pendingApprovals:
+          type: integer
+        projectsAwaitingAnalysis:
+          type: integer
+
+    ActivityItem:
+      type: object
+      required: [id, type, description, createdAt]
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [project_added, analysis_completed, vault_entry, task_completed, audit_entry, score_updated]
+        description:
+          type: string
+        projectId:
+          type: ["integer", "null"]
+        projectName:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time

@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Kee — Cognitive Software Asset Intelligence"
+version = "1.0.0"
+id = "artifacts/kee"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22118
+
+[services.development]
+run = "pnpm --filter @workspace/kee run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/kee", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/kee/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22118"
+BASE_PATH = "/"
