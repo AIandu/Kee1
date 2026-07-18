@@ -1,36 +1,139 @@
-import React from 'react';
-import { useGetDashboardSummary } from '@workspace/api-client-react';
+import React, { useState, useEffect } from 'react';
+import { useGetDashboardSummary, useCreateProject, useListProjects } from '@workspace/api-client-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Link } from 'wouter';
-import { ArrowUpRight, BarChart3, Briefcase, FileCode2, Plus, Target } from 'lucide-react';
+import { ArrowUpRight, BarChart3, Briefcase, FileCode2, Plus, Target, Github, Search, Loader2, Lock, Globe } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { DialogHeader } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogTrigger, DialogContent, DialogTitle } from '@radix-ui/react-dialog';
-import { SelectTrigger, SelectValue, SelectContent, SelectItem } from '@radix-ui/react-select';
-import { Button, Select } from 'react-day-picker';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+
+interface GithubRepo {
+  name: string;
+  fullName: string;
+  url: string;
+  description: string | null;
+  language: string | null;
+  stars: number;
+  updatedAt: string;
+  private: boolean;
+}
+
+function useGithubRepos() {
+  const [repos, setRepos] = useState<GithubRepo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetch_ = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/github/repos?per_page=100');
+      if (!res.ok) throw new Error(await res.text());
+      setRepos(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load repos');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { repos, loading, error, fetch: fetch_ };
+}
 
 export default function Dashboard() {
   const { data: summary, isLoading } = useGetDashboardSummary();
+  const { data: projects } = useListProjects();
+  const createMut = useCreateProject();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
-  if (isLoading || !summary) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [step, setStep] = useState<'pick' | 'form'>('pick');
+  const [search, setSearch] = useState('');
+  const [form, setForm] = useState({ name: '', repoUrl: '', analysisMode: 'blind', description: '' });
+  const { repos, loading: reposLoading, error: reposError, fetch: fetchRepos } = useGithubRepos();
+
+  // Auto-refresh dashboard every 8s if any project is analyzing
+  const hasAnalyzing = projects?.some(p => p.status === 'analyzing');
+  useEffect(() => {
+    if (!hasAnalyzing) return;
+    const id = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ['/api/dashboard/summary'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/projects'] });
+    }, 8000);
+    return () => clearInterval(id);
+  }, [hasAnalyzing, queryClient]);
+
+  const openDialog = () => {
+    setIsOpen(true);
+    setStep('pick');
+    setSearch('');
+    setForm({ name: '', repoUrl: '', analysisMode: 'blind', description: '' });
+    fetchRepos();
+  };
+
+  const pickRepo = (repo: GithubRepo) => {
+    setForm({
+      name: repo.name,
+      repoUrl: repo.url,
+      analysisMode: 'blind',
+      description: repo.description ?? '',
+    });
+    setStep('form');
+  };
+
+  const handleManual = () => {
+    setForm({ name: '', repoUrl: '', analysisMode: 'blind', description: '' });
+    setStep('form');
+  };
+
+  const handleCreate = () => {
+    if (!form.name.trim()) return;
+    createMut.mutate(
+      { name: form.name, repoUrl: form.repoUrl || undefined, analysisMode: form.analysisMode as 'blind' | 'documented', description: form.description || undefined },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ['/api/dashboard/summary'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/projects'] });
+          setIsOpen(false);
+          toast({ title: 'Project added', description: `${form.name} is in your portfolio. Open it to run the AI Council.` });
+        },
+        onError: (e) => {
+          toast({ title: 'Error', description: String(e), variant: 'destructive' });
+        },
+      }
+    );
+  };
+
+  const filteredRepos = repos.filter(r =>
+    r.fullName.toLowerCase().includes(search.toLowerCase()) ||
+    (r.description ?? '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const formatCurrency = (val: number | null | undefined) => {
+    if (!val) return '—';
+    if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
+    if (val >= 1_000) return `$${Math.round(val / 1_000)}K`;
+    return `$${val}`;
+  };
+
+  if (isLoading) {
     return (
       <div className="p-12 animate-pulse space-y-8">
-        <div className="h-8 bg-muted rounded w-1/4 mb-8"></div>
+        <div className="h-8 bg-muted rounded w-1/4 mb-8" />
         <div className="grid grid-cols-4 gap-6">
-          {[1,2,3,4].map(i => <div key={i} className="h-32 bg-muted rounded"></div>)}
+          {[1, 2, 3, 4].map(i => <div key={i} className="h-32 bg-muted rounded" />)}
         </div>
-        <div className="h-96 bg-muted rounded"></div>
+        <div className="h-96 bg-muted rounded" />
       </div>
     );
   }
-
-  const formatCurrency = (val: number | null | undefined) => {
-    if (val == null) return '$0';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
-  };
 
   return (
     <div className="max-w-7xl mx-auto p-12 space-y-12">
@@ -39,56 +142,146 @@ export default function Dashboard() {
           <h1 className="text-3xl font-serif text-foreground mb-2">Portfolio Dashboard</h1>
           <p className="text-muted-foreground">Strategic overview of your software assets and their market readiness.</p>
         </div>
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2 bg-foreground text-background hover:bg-foreground/90"><Plus className="w-4 h-4" /> Add Project</Button>
+            <Button onClick={openDialog} className="gap-2 bg-foreground text-background hover:bg-foreground/90">
+              <Plus className="w-4 h-4" /> Add Project
+            </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="sm:max-w-[560px] max-h-[90vh] flex flex-col">
             <DialogHeader>
-              <DialogTitle className="font-serif">Add Software Asset</DialogTitle>
+              <DialogTitle className="font-serif">
+                {step === 'pick' ? 'Choose a GitHub Repository' : 'Confirm Project Details'}
+              </DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 py-4">
-              <Input 
-                placeholder="Project Name" 
-                value={newProject.name} 
-                onChange={e => setNewProject({...newProject, name: e.target.value})} 
-                className="font-serif text-lg bg-muted/30"
-              />
-              <Input 
-                placeholder="Repository URL (optional)" 
-                value={newProject.repoUrl} 
-                onChange={e => setNewProject({...newProject, repoUrl: e.target.value})} 
-              />
-              <Select value={newProject.analysisMode} onValueChange={val => setNewProject({...newProject, analysisMode: val})}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Analysis Mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="documented">Documented (Uses repo docs)</SelectItem>
-                  <SelectItem value="blind">Blind (Ignores docs, code only)</SelectItem>
-                </SelectContent>
-              </Select>
-              <Textarea 
-                placeholder="Brief description or context..." 
-                className="resize-y"
-                value={newProject.description}
-                onChange={e => setNewProject({...newProject, description: e.target.value})}
-              />
-              <Button onClick={handleCreateProject} disabled={!newProject.name || createProjectMut.isPending} className="w-full">
-                Add to Portfolio
-              </Button>
-            </div>
+
+            {step === 'pick' && (
+              <div className="flex flex-col gap-4 flex-1 min-h-0">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search your repositories..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="pl-9"
+                    autoFocus
+                  />
+                </div>
+
+                {reposLoading && (
+                  <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-sm">Connecting to GitHub...</span>
+                  </div>
+                )}
+
+                {reposError && (
+                  <div className="text-sm text-destructive bg-destructive/10 rounded-md p-3">{reposError}</div>
+                )}
+
+                {!reposLoading && !reposError && (
+                  <div className="overflow-y-auto flex-1 space-y-1 pr-1" style={{ maxHeight: 360 }}>
+                    {filteredRepos.map(repo => (
+                      <button
+                        key={repo.fullName}
+                        onClick={() => pickRepo(repo)}
+                        className="w-full text-left px-4 py-3 rounded-lg hover:bg-muted/60 transition-colors group border border-transparent hover:border-border"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {repo.private
+                              ? <Lock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                              : <Globe className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            }
+                            <span className="font-medium text-sm text-foreground truncate">{repo.fullName}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 text-xs text-muted-foreground">
+                            {repo.language && <span className="font-mono">{repo.language}</span>}
+                            {repo.stars > 0 && <span>★ {repo.stars}</span>}
+                          </div>
+                        </div>
+                        {repo.description && (
+                          <p className="text-xs text-muted-foreground mt-1 ml-5 line-clamp-1">{repo.description}</p>
+                        )}
+                      </button>
+                    ))}
+                    {filteredRepos.length === 0 && !reposLoading && (
+                      <p className="text-center text-sm text-muted-foreground py-8">No repositories match your search.</p>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-border">
+                  <button onClick={handleManual} className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+                    <Github className="w-3.5 h-3.5" /> Enter URL manually instead
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 'form' && (
+              <div className="space-y-4 py-2">
+                {form.repoUrl && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md text-sm text-muted-foreground">
+                    <Github className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate font-mono text-xs">{form.repoUrl}</span>
+                  </div>
+                )}
+                <Input
+                  placeholder="Project Name"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  className="font-serif text-lg bg-muted/30"
+                  autoFocus
+                />
+                {!form.repoUrl && (
+                  <Input
+                    placeholder="GitHub Repository URL"
+                    value={form.repoUrl}
+                    onChange={e => setForm({ ...form, repoUrl: e.target.value })}
+                  />
+                )}
+                <Select value={form.analysisMode} onValueChange={val => setForm({ ...form, analysisMode: val })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Analysis Mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="blind">Blind — code only, ignore documentation</SelectItem>
+                    <SelectItem value="documented">Documented — use all available context</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Textarea
+                  placeholder="Additional context (optional)..."
+                  className="resize-none"
+                  rows={3}
+                  value={form.description}
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                />
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setStep('pick')} className="flex-1">Back</Button>
+                  <Button
+                    onClick={handleCreate}
+                    disabled={!form.name.trim() || createMut.isPending}
+                    className="flex-1 bg-foreground text-background hover:bg-foreground/90"
+                  >
+                    {createMut.isPending ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Adding...</> : 'Add to Portfolio'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </header>
 
+      {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <Card>
           <CardContent className="p-6">
             <div className="flex justify-between items-start">
               <div className="space-y-1">
                 <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Total Value</p>
-                <p className="text-2xl font-light text-primary">{formatCurrency(summary.totalEstimatedValue)}</p>
+                <p className="text-2xl font-light text-primary">{formatCurrency(summary?.totalEstimatedValue)}</p>
               </div>
               <div className="p-2 bg-primary/10 rounded-md"><BarChart3 className="w-4 h-4 text-primary" /></div>
             </div>
@@ -99,12 +292,12 @@ export default function Dashboard() {
             <div className="flex justify-between items-start">
               <div className="space-y-1">
                 <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Projects</p>
-                <p className="text-2xl font-light text-foreground">{summary.totalProjects}</p>
+                <p className="text-2xl font-light text-foreground">{summary?.totalProjects ?? 0}</p>
               </div>
               <div className="p-2 bg-secondary/20 rounded-md"><Briefcase className="w-4 h-4 text-secondary" /></div>
             </div>
             <div className="mt-4 flex items-center text-xs text-muted-foreground">
-              <span>{summary.analyzedProjects} fully analyzed</span>
+              <span>{summary?.analyzedProjects ?? 0} fully analyzed</span>
             </div>
           </CardContent>
         </Card>
@@ -113,11 +306,11 @@ export default function Dashboard() {
             <div className="flex justify-between items-start">
               <div className="space-y-1">
                 <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Avg Value Score</p>
-                <p className="text-2xl font-light text-foreground">{Math.round(summary.avgValueScore || 0)}<span className="text-sm text-muted-foreground">/100</span></p>
+                <p className="text-2xl font-light text-foreground">{Math.round(summary?.avgValueScore || 0)}<span className="text-sm text-muted-foreground">/100</span></p>
               </div>
               <div className="p-2 bg-muted rounded-md"><Target className="w-4 h-4 text-foreground/60" /></div>
             </div>
-            <Progress value={summary.avgValueScore || 0} className="mt-4 h-1.5" />
+            <Progress value={summary?.avgValueScore || 0} className="mt-4 h-1.5" />
           </CardContent>
         </Card>
         <Card>
@@ -125,21 +318,22 @@ export default function Dashboard() {
             <div className="flex justify-between items-start">
               <div className="space-y-1">
                 <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Avg Readiness</p>
-                <p className="text-2xl font-light text-foreground">{Math.round(summary.avgReadinessScore || 0)}<span className="text-sm text-muted-foreground">/100</span></p>
+                <p className="text-2xl font-light text-foreground">{Math.round(summary?.avgReadinessScore || 0)}<span className="text-sm text-muted-foreground">/100</span></p>
               </div>
               <div className="p-2 bg-muted rounded-md"><FileCode2 className="w-4 h-4 text-foreground/60" /></div>
             </div>
-            <Progress value={summary.avgReadinessScore || 0} className="mt-4 h-1.5 [&>div]:bg-secondary" />
+            <Progress value={summary?.avgReadinessScore || 0} className="mt-4 h-1.5 [&>div]:bg-secondary" />
           </CardContent>
         </Card>
       </div>
 
+      {/* Projects table */}
       <section>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-medium text-foreground">Top Projects</h2>
+          <h2 className="text-lg font-medium text-foreground">Portfolio</h2>
           <span className="text-sm text-muted-foreground">Ranked by Value Score</span>
         </div>
-        
+
         <div className="bg-card border border-border rounded-lg overflow-hidden">
           <table className="w-full text-left text-sm">
             <thead className="bg-muted/50 border-b border-border">
@@ -149,45 +343,46 @@ export default function Dashboard() {
                 <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Value Score</th>
                 <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Readiness</th>
                 <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium text-right">Est. Value</th>
-                <th className="px-6 py-4"></th>
+                <th className="px-6 py-4" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {summary.topProjects.map((project, i) => (
-                <motion.tr 
+              {(summary?.topProjects ?? []).map((project, i) => (
+                <motion.tr
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
-                  key={project.id} 
+                  key={project.id}
                   className="hover:bg-muted/30 transition-colors group"
                 >
                   <td className="px-6 py-4">
                     <div className="font-medium text-foreground">{project.name}</div>
-                    <div className="text-xs text-muted-foreground truncate max-w-[200px] mt-1">{project.primaryLanguage || 'Unknown'}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{project.primaryLanguage || '—'}</div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
                       project.status === 'ready_for_market' ? 'bg-primary/10 text-primary' :
                       project.status === 'analyzed' ? 'bg-secondary/20 text-secondary-foreground' :
-                      project.status === 'analyzing' ? 'bg-muted text-muted-foreground animate-pulse' :
+                      project.status === 'analyzing' ? 'bg-muted text-muted-foreground' :
                       'bg-muted text-muted-foreground'
                     }`}>
+                      {project.status === 'analyzing' && <Loader2 className="w-3 h-3 animate-spin" />}
                       {project.status.replace(/_/g, ' ')}
                     </span>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono w-6">{project.valueScore || '-'}</span>
-                      <Progress value={project.valueScore || 0} className="w-16 h-1.5" />
+                      <span className="font-mono w-6 text-xs">{project.valueScore ?? '—'}</span>
+                      <Progress value={project.valueScore ?? 0} className="w-16 h-1.5" />
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono w-6">{project.readinessScore || '-'}</span>
-                      <Progress value={project.readinessScore || 0} className="w-16 h-1.5 [&>div]:bg-secondary" />
+                      <span className="font-mono w-6 text-xs">{project.readinessScore ?? '—'}</span>
+                      <Progress value={project.readinessScore ?? 0} className="w-16 h-1.5 [&>div]:bg-secondary" />
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-right font-mono">
+                  <td className="px-6 py-4 text-right font-mono text-sm">
                     {formatCurrency(project.estimatedMarketValue)}
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -197,10 +392,14 @@ export default function Dashboard() {
                   </td>
                 </motion.tr>
               ))}
-              {summary.topProjects.length === 0 && (
+              {(summary?.topProjects ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
-                    No projects found. Add projects to see them ranked here.
+                  <td colSpan={6} className="px-6 py-16 text-center">
+                    <div className="space-y-3">
+                      <Briefcase className="w-8 h-8 mx-auto text-muted-foreground/40" />
+                      <p className="text-muted-foreground text-sm">No projects yet.</p>
+                      <p className="text-muted-foreground/60 text-xs">Add a GitHub repository to begin your first AI Council analysis.</p>
+                    </div>
                   </td>
                 </tr>
               )}

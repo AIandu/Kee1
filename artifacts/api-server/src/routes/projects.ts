@@ -12,6 +12,8 @@ import {
   GetProjectAnalysesParams,
   GetProjectRelationshipsParams,
 } from "@workspace/api-zod";
+import { parseGitHubUrl, fetchRepoSnapshot } from "../services/github.js";
+import { runFullCouncil } from "../services/council.js";
 
 const router: IRouter = Router();
 
@@ -126,7 +128,7 @@ router.delete("/projects/:id", async (req, res): Promise<void> => {
   res.sendStatus(204);
 });
 
-// Trigger analysis
+// Trigger analysis — responds immediately, runs council in background
 router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
   const params = AnalyzeProjectParams.safeParse(req.params);
   if (!params.success) {
@@ -148,33 +150,135 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
     return;
   }
 
-  // Create a task for the analysis
+  if (!project.repoUrl) {
+    res.status(422).json({ error: "Project has no GitHub URL. Add a repo URL before analyzing." });
+    return;
+  }
+
+  const githubCoords = parseGitHubUrl(project.repoUrl);
+  if (!githubCoords) {
+    res.status(422).json({ error: "Could not parse GitHub URL. Expected format: https://github.com/owner/repo" });
+    return;
+  }
+
+  // Create tracking task + set project to analyzing
   const [task] = await db
     .insert(tasksTable)
     .values({
       title: `AI Council Analysis: ${project.name}`,
-      description: `Full AI Council analysis of project ${project.name}`,
+      description: `Full 5-member AI Council analysis of ${githubCoords.owner}/${githubCoords.repo}`,
       status: "queued",
       projectId: project.id,
     })
     .returning();
 
-  // Mark project as analyzing
   await db
     .update(projectsTable)
     .set({ status: "analyzing", updatedAt: new Date() })
     .where(eq(projectsTable.id, project.id));
 
-  // Audit log
   await db.insert(auditLogsTable).values({
     projectId: project.id,
-    action: "Analysis triggered",
-    reason: "User requested AI Council analysis",
+    action: "AI Council analysis triggered",
+    reason: `User requested ${project.analysisMode} analysis`,
     agent: "system",
     approvalStatus: "approved",
   });
 
-  res.status(202).json(task);
+  // Respond immediately — analysis runs in background
+  res.status(202).json({ taskId: task.id, message: "Analysis queued. Council is convening." });
+
+  // ── Background work ──────────────────────────────────────────────────────
+  const blind = project.analysisMode === "blind";
+
+  (async () => {
+    try {
+      // Mark task running
+      await db
+        .update(tasksTable)
+        .set({ status: "running" })
+        .where(eq(tasksTable.id, task.id));
+
+      // Fetch real GitHub data
+      const snapshot = await fetchRepoSnapshot(githubCoords.owner, githubCoords.repo);
+
+      // Run full AI Council
+      const { findings, verdict } = await runFullCouncil(snapshot, blind);
+
+      // Persist council findings (one row per role)
+      for (const finding of findings) {
+        await db.insert(analysesTable).values({
+          projectId: project.id,
+          role: finding.role,
+          content: finding.content,
+          confidenceLevel: finding.confidenceLevel,
+          governorStatus: "pending",
+        });
+      }
+
+      // Persist governor verdict as its own analysis row
+      await db.insert(analysesTable).values({
+        projectId: project.id,
+        role: "governor",
+        content: verdict.content,
+        confidenceLevel: verdict.confidenceLevel,
+        governorStatus: "approved",
+        governorNote: "Governor self-verified",
+      });
+
+      // Update project with scores and inferred data
+      await db
+        .update(projectsTable)
+        .set({
+          status: "analyzed",
+          valueScore: verdict.valueScore,
+          readinessScore: verdict.readinessScore,
+          opportunityScore: verdict.opportunityScore,
+          estimatedMarketValue: verdict.estimatedMarketValue,
+          estimatedBuildCost: verdict.estimatedBuildCost,
+          tags: verdict.tags.length > 0 ? verdict.tags : project.tags,
+          inferredDescription: verdict.inferredDescription || null,
+          primaryLanguage: verdict.primaryLanguage || snapshot.metadata.language || null,
+          description: project.description ?? (snapshot.metadata.description || null),
+          updatedAt: new Date(),
+        })
+        .where(eq(projectsTable.id, project.id));
+
+      // Mark task complete
+      await db
+        .update(tasksTable)
+        .set({
+          status: "completed",
+          result: `Council complete. Value: ${verdict.valueScore}/100 · Readiness: ${verdict.readinessScore}/100 · Opportunity: ${verdict.opportunityScore}/100. Estimated market value: ${verdict.estimatedMarketValue.toLocaleString()}.`,
+          completedAt: new Date(),
+        })
+        .where(eq(tasksTable.id, task.id));
+
+      // Audit trail
+      await db.insert(auditLogsTable).values({
+        projectId: project.id,
+        action: "AI Council analysis complete",
+        before: "status: analyzing",
+        after: `status: analyzed | value: ${verdict.valueScore} | readiness: ${verdict.readinessScore} | opportunity: ${verdict.opportunityScore}`,
+        reason: "All council members reported. Governor synthesized findings.",
+        agent: "governor",
+        approvalStatus: "pending",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error(`[council] Analysis failed for project ${project.id}:`, err);
+
+      await db
+        .update(tasksTable)
+        .set({ status: "failed", result: `Analysis failed: ${msg}` })
+        .where(eq(tasksTable.id, task.id));
+
+      await db
+        .update(projectsTable)
+        .set({ status: "pending", updatedAt: new Date() })
+        .where(eq(projectsTable.id, project.id));
+    }
+  })();
 });
 
 // Get project analyses

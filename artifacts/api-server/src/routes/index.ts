@@ -6,6 +6,7 @@ import vaultRouter from "./vault";
 import auditRouter from "./audit";
 import tasksRouter from "./tasks";
 import dashboardRouter from "./dashboard";
+import githubRouter from "./github";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(vaultRouter);
 router.use(auditRouter);
 router.use(tasksRouter);
 router.use(dashboardRouter);
+router.use(githubRouter);
 
 export default router;
