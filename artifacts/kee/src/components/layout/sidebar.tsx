@@ -19,7 +19,11 @@ const navItems = [
   { href: '/council', icon: Users, label: 'AI Council' },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export function Sidebar({ onClose }: SidebarProps) {
   const [location] = useLocation();
 
   return (
@@ -39,6 +43,7 @@ export function Sidebar() {
             <Link 
               key={item.href} 
               href={item.href}
+              onClick={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all duration-200 ${
                 isActive 
                   ? 'bg-primary/10 text-primary font-medium' 
