@@ -1,18 +1,111 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRoute, Link } from 'wouter';
 import {
   useGetProject,
   useGetProjectAnalyses,
   useAnalyzeProject,
+  customFetch,
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Play, ExternalLink, Github, Loader2, AlertCircle, RefreshCw, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Play, ExternalLink, Github, Loader2, AlertCircle, RefreshCw, Copy, Check, Send, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import avatarUrl from '@assets/1783969794751_1784416923551.png';
 
-type Tab = 'overview' | 'code' | 'whitepaper' | 'outreach';
+type Tab = 'overview' | 'code' | 'whitepaper' | 'outreach' | 'chat';
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+function ChatPanel({ projectId }: { projectId: number }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { role: 'assistant', content: 'Ask me anything about this project — the code, the market, who to pitch, what to fix first. I know it well.' }
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    const history = messages.slice(1); // skip the welcome message from history
+    setMessages(prev => [...prev, { role: 'user', content: text }]);
+    setInput('');
+    setLoading(true);
+    try {
+      const data = await customFetch<{ reply: string }>(`/api/projects/${projectId}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ message: text, history }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-[520px]">
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1 pb-4">
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            {msg.role === 'assistant' && (
+              <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 mt-0.5">
+                <img src={avatarUrl} alt="Kee" className="w-full h-full object-cover" />
+              </div>
+            )}
+            <div className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+              msg.role === 'user'
+                ? 'bg-foreground text-background rounded-br-sm'
+                : 'bg-muted text-foreground rounded-bl-sm'
+            }`}>
+              {msg.content}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex gap-3">
+            <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 mt-0.5">
+              <img src={avatarUrl} alt="Kee" className="w-full h-full object-cover" />
+            </div>
+            <div className="bg-muted rounded-2xl rounded-bl-sm px-4 py-3">
+              <div className="flex gap-1">
+                {[0,1,2].map(i => (
+                  <div key={i} className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce"
+                    style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="border-t border-border pt-4 flex gap-2 items-end">
+        <Textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Ask Kee about this project…"
+          className="resize-none min-h-[44px] max-h-32 text-sm"
+          rows={1}
+        />
+        <Button onClick={send} disabled={!input.trim() || loading} size="sm" className="shrink-0 h-10 w-10 p-0">
+          <Send className="w-4 h-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function MarkdownBlock({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -110,6 +203,7 @@ export default function ProjectDetail() {
     { id: 'code', label: 'Code Analysis', available: hasResults },
     { id: 'whitepaper', label: 'White Paper', available: !!whitePaper },
     { id: 'outreach', label: 'Outreach', available: !!(outreach || market) },
+    { id: 'chat', label: '💬 Ask Kee', available: true },
   ];
 
   return (
@@ -309,6 +403,11 @@ export default function ProjectDetail() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Chat tab */}
+          {activeTab === 'chat' && (
+            <ChatPanel projectId={projectId} />
           )}
         </div>
       )}

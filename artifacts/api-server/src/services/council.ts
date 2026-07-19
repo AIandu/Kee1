@@ -235,34 +235,41 @@ The 3 most important actions Loretta should take in the next 30 days to move thi
 async function runMarketEvaluator(snapshot: RepoSnapshot, blind: boolean): Promise<CouncilFinding> {
   const context = buildContext(snapshot, blind);
   const content = await gpt(
-    `You are Kee's Market Analyst. Produce a market evaluation for this software project.
+    `You are Kee's Market Analyst. Produce a grounded, conservative market evaluation for this software project. Do NOT inflate values — buyers are sophisticated and will walk away from unrealistic numbers.
 
 Your output must have these clearly labeled sections:
 
 ## MARKET CATEGORY
-What space does this compete in? (e.g., "Developer tooling / AI-assisted code review")
+What space does this compete in? Be specific (e.g., "Developer tooling / AI-assisted code review — small segment of the $6B DevOps market").
 
-## MARKET SIZE
-Estimated TAM with reasoning. Be specific — cite comparable markets if possible.
+## HONEST MATURITY ASSESSMENT
+How production-ready is this really? Rate: Prototype / Alpha / Beta / Production-Ready. Explain what evidence supports this rating (commit frequency, test coverage observed, documentation quality, etc.).
 
 ## DIRECT COMPETITORS
-List 3-5 real competitors with: name, pricing (if known), key differentiator vs this project.
+List 3-5 real competitors. For each: name, pricing model, key strength vs this project, key weakness.
 
-## THIS PROJECT'S EDGE
-What makes this worth paying for vs alternatives?
+## REALISTIC VALUATION METHODOLOGY
+Walk through your reasoning step by step:
+1. What comparable sales or revenue multiples apply to this type of project?
+2. What evidence from the code/commits supports or limits the valuation?
+3. What would a strategic buyer pay vs a financial buyer?
+
+## VALUATION RANGE
+Give a LOW (distressed/quick sale), MID (fair market), and HIGH (strategic acquirer) value — not a single number.
+- LOW: $[amount] — [one sentence why]
+- MID: $[amount] — [one sentence why]  
+- HIGH: $[amount] — [one sentence why]
+
+ESTIMATED_MARKET_VALUE: [MID value as integer USD, no symbols — be conservative, most indie projects sell for $5K-$150K, not millions]
+ESTIMATED_BUILD_COST: [realistic cost to rebuild this from scratch with freelancers, integer USD]
 
 ## REVENUE MODEL OPTIONS
-Which monetization approach fits best and why: SaaS, usage-based, one-time license, open-core, marketplace?
-
-## VALUATION ESTIMATE
-OPPORTUNITY_SCORE: [0-100]
-ESTIMATED_MARKET_VALUE: [number in USD — what a buyer would pay today]
-ESTIMATED_BUILD_COST: [number in USD — what it would cost to build this from scratch]
+Which fits best and why? Be specific about pricing tiers if recommending SaaS.
 
 ## TIME TO REVENUE
-If properly resourced, how long to first paying customer?`,
+Realistic timeline with specific milestones.`,
     context,
-    2000
+    2200
   );
   return { role: "market_evaluator", content, confidenceLevel: "inferred" };
 }
@@ -280,23 +287,28 @@ async function runGovernor(
     .join("\n\n");
 
   const raw = await gpt(
-    `You are Kee — a decisive cognitive partner and software intelligence. You have received analysis from your team on a software repository. Synthesize it into an executive briefing for Loretta.
+    `You are Kee — a decisive cognitive partner and software intelligence. You have received analysis from your team on a software repository. Synthesize it into an honest executive briefing for Loretta. She is making real business decisions based on what you tell her — do not flatter or inflate.
 
 Your response MUST follow this exact format:
 
 VERDICT:
-[Write 300-500 words. Lead with the single most important insight about this project. What is it really? What's the opportunity? What's the risk? What should Loretta do first? Be decisive — no hedging. Write as Kee speaking directly to Loretta.]
+[Write 300-500 words. Lead with the single most important truth about this project — what it actually is, not what it aspires to be. Assess: is this a real asset or a prototype? What is the genuine opportunity? What are the honest risks? What is the ONE most important thing Loretta should do first? Be direct. No corporate speak. Write as Kee speaking privately to Loretta.]
 
-CONFIDENCE: [confirmed|inferred|unknown]
-VALUE_SCORE: [0-100 — overall quality and value of the asset]
-READINESS_SCORE: [0-100 — how ready is this to show to a buyer or investor]
-OPPORTUNITY_SCORE: [0-100 — commercial opportunity strength]
-ESTIMATED_MARKET_VALUE: [number in USD, no symbols, e.g. 450000]
-ESTIMATED_BUILD_COST: [number in USD, no symbols, e.g. 180000]
+CONFIDENCE: [confirmed|inferred|unknown — confirmed means you saw substantial working code; inferred means limited code available; unknown means the repo was empty or inaccessible]
+VALUE_SCORE: [0-100 — honest quality and completeness score. Most indie projects score 20-60. A polished, well-tested, documented project scores 70+. Perfect code with users = 85+]
+READINESS_SCORE: [0-100 — could Loretta show this to a buyer TODAY without embarrassment? Be harsh here.]
+OPPORTUNITY_SCORE: [0-100 — commercial potential of the concept and execution combined]
+ESTIMATED_MARKET_VALUE: [integer USD — what a real buyer would pay today. Most indie repos: $3,000-$50,000. Polished SaaS with users: $50,000-$500,000. Only use higher numbers if the team analysis found clear evidence of revenue or strategic value. Base it on the market evaluator's MID estimate.]
+ESTIMATED_BUILD_COST: [integer USD — freelancer cost to rebuild from scratch. Be realistic.]
 INFERRED_DESCRIPTION: [one crisp sentence: what this software does and for whom]
 PRIMARY_LANGUAGE: [dominant programming language]
-TAGS: [3-6 comma-separated tags, e.g. saas,react,typescript,devtools]`,
-    `Repository: ${snapshot.metadata.fullName}\n\nTEAM ANALYSIS:\n\n${findingsSummary}`,
+TAGS: [3-6 comma-separated lowercase tags, e.g. saas,react,typescript,devtools]`,
+    `Repository: ${snapshot.metadata.fullName}
+Stars: ${snapshot.metadata.stars} | Forks: ${snapshot.metadata.forks} | Size: ${snapshot.metadata.size}KB | Last commit: ${snapshot.metadata.updatedAt?.slice(0, 10) ?? 'unknown'}
+
+TEAM ANALYSIS:
+
+${findingsSummary}`,
     2000
   );
 

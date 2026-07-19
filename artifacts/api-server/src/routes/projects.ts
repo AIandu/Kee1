@@ -268,9 +268,27 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
       const msg = err instanceof Error ? err.message : "Unknown error";
       console.error(`[council] Analysis failed for project ${project.id}:`, err);
 
+      // Determine user-friendly reason
+      const isQuota = msg.includes("quota") || msg.includes("billing") || msg.includes("insufficient") || msg.includes("credit") || msg.includes("429") || msg.includes("rate limit");
+      const isEmptyRepo = msg.includes("empty") || msg.includes("409") || msg.includes("Git Repository is empty");
+      const friendlyMsg = isQuota
+        ? "OpenAI credit balance is too low to run analysis. Please add credits at platform.openai.com and try again."
+        : isEmptyRepo
+        ? "This repository appears to be empty — no code or commits were found. Add some code and try again."
+        : `Analysis failed: ${msg}`;
+
+      // Store the error as a governor finding so the UI can show it
+      await db.insert(analysesTable).values({
+        projectId: project.id,
+        role: "governor",
+        content: `⚠️ ${friendlyMsg}`,
+        confidenceLevel: "unknown",
+        governorStatus: "pending",
+      });
+
       await db
         .update(tasksTable)
-        .set({ status: "failed", result: `Analysis failed: ${msg}` })
+        .set({ status: "failed", result: friendlyMsg })
         .where(eq(tasksTable.id, task.id));
 
       await db
@@ -279,6 +297,78 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
         .where(eq(projectsTable.id, project.id));
     }
   })();
+});
+
+// Chat with Kee about a specific project
+router.post("/projects/:id/chat", async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
+
+  const { message, history = [] } = req.body as {
+    message: string;
+    history?: Array<{ role: "user" | "assistant"; content: string }>;
+  };
+
+  if (!message?.trim()) {
+    res.status(400).json({ error: "message is required" });
+    return;
+  }
+
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const analyses = await db
+    .select()
+    .from(analysesTable)
+    .where(eq(analysesTable.projectId, id))
+    .orderBy(desc(analysesTable.createdAt));
+
+  const governor = analyses.find(a => a.role === "governor" && !a.content.startsWith("⚠️"));
+  const codeAudit = analyses.find(a => a.role === "researcher");
+  const market = analyses.find(a => a.role === "market_evaluator");
+
+  const projectContext = `
+PROJECT: ${project.name}
+${project.inferredDescription ? `Description: ${project.inferredDescription}` : ""}
+${project.primaryLanguage ? `Primary language: ${project.primaryLanguage}` : ""}
+${project.tags?.length ? `Tags: ${project.tags.join(", ")}` : ""}
+${project.valueScore != null ? `Scores — Value: ${project.valueScore}/100, Readiness: ${project.readinessScore}/100, Opportunity: ${project.opportunityScore}/100` : ""}
+${project.estimatedMarketValue ? `Estimated market value: ${project.estimatedMarketValue.toLocaleString()}` : ""}
+
+${governor ? `KEE'S SUMMARY:\n${governor.content.slice(0, 1500)}` : ""}
+${codeAudit ? `\nCODE AUDIT (excerpt):\n${codeAudit.content.slice(0, 800)}` : ""}
+${market ? `\nMARKET ANALYSIS (excerpt):\n${market.content.slice(0, 800)}` : ""}
+  `.trim();
+
+  const { default: OpenAI } = await import("openai");
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 800,
+    messages: [
+      {
+        role: "system",
+        content: `You are Kee — Loretta's private cognitive partner for evaluating software assets. You are direct, sharp, and genuinely helpful. You speak to Loretta as an equal and a trusted advisor, not a chatbot. You have analyzed this project and know it well.
+
+When Loretta asks about code, valuation, who to sell to, what to fix, or anything about this project — answer decisively from your analysis. Do not hedge unnecessarily. Keep responses concise: 2-4 paragraphs max unless she asks for more detail.
+
+PROJECT CONTEXT:
+${projectContext}`,
+      },
+      ...history.slice(-8), // keep last 8 turns for context
+      { role: "user", content: message },
+    ],
+  });
+
+  const reply = completion.choices[0]?.message?.content ?? "I'm not sure — try rephrasing?";
+  res.json({ reply });
 });
 
 // Get project analyses
