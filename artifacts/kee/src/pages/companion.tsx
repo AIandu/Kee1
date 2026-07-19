@@ -8,11 +8,20 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 
+function localGreeting(): string {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return 'Good morning, Loretta. Kee has been watching your portfolio.';
+  if (h >= 12 && h < 17) return 'Good afternoon, Loretta. Here is your intelligence briefing.';
+  if (h >= 17 && h < 21) return 'Good evening, Loretta. Let us review what matters most.';
+  return 'Working late, Loretta. Kee is with you.';
+}
+
 export default function Companion() {
   const { data: companion, isLoading } = useGetDailyCompanion();
   const [idea, setIdea] = useState('');
   const createVaultEntryMut = useCreateVaultEntry();
   const { toast } = useToast();
+  const greeting = localGreeting();
 
   const handleSaveIdea = () => {
     if (!idea.trim()) return;
@@ -55,7 +64,7 @@ export default function Companion() {
               {companion.date}
             </p>
             <h1 className="text-2xl sm:text-3xl font-serif text-foreground leading-snug">
-              {companion.greeting}
+              {greeting}
             </h1>
           </div>
         </div>

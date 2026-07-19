@@ -1,9 +1,7 @@
 import OpenAI from "openai";
-import Anthropic from "@anthropic-ai/sdk";
 import type { RepoSnapshot } from "./github.js";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export type CouncilRole =
   | "researcher"
@@ -50,7 +48,7 @@ function buildContext(snapshot: RepoSnapshot, blind: boolean): string {
     .join(", ");
 
   const meta = blind
-    ? `REPOSITORY STATS (blind mode — no author context)
+    ? `REPOSITORY STATS (blind mode)
 Stars: ${snapshot.metadata.stars} | Forks: ${snapshot.metadata.forks} | Open Issues: ${snapshot.metadata.openIssues} | Open PRs: ${snapshot.openPRs}
 Size: ${snapshot.metadata.size}KB | License: ${snapshot.metadata.license ?? "none"} | Created: ${snapshot.metadata.createdAt.slice(0, 10)} | Last updated: ${snapshot.metadata.updatedAt.slice(0, 10)}
 Languages: ${langSection}
@@ -76,219 +74,236 @@ KEY FILE CONTENTS:
 ${fileSection}`;
 }
 
-// ─── Individual council roles ────────────────────────────────────────────────
+async function gpt(system: string, user: string, maxTokens = 2000): Promise<string> {
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: maxTokens,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+  });
+  return res.choices[0]?.message?.content ?? "";
+}
+
+// ─── Role 1: Code Audit ───────────────────────────────────────────────────────
+// Appears in "Code Analysis" tab — what's broken, what's solid, specific fixes
 
 async function runResearcher(snapshot: RepoSnapshot, blind: boolean): Promise<CouncilFinding> {
   const context = buildContext(snapshot, blind);
+  const content = await gpt(
+    `You are Kee's Code Auditor. Read the actual source code files provided and produce a thorough technical audit.
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 8192,
-    system: `You are the Researcher on Kee's AI Council. Your role is to establish factual, verifiable truth about a software repository.
+Your output must have these clearly labeled sections:
 
-Analyze the provided repository data and produce a rigorous research report covering:
-1. Development timeline and activity patterns (infer from commit history and dates)
-2. Project maturity signals (commit frequency, issue velocity, contributor patterns)
-3. Technology stack confirmation (languages, frameworks, dependencies)
-4. Repository health indicators (license, CI/CD presence, test files, documentation)
-5. Any anomalies or contradictions in the data
+## WHAT'S WORKING WELL
+List 3-6 concrete strengths with specific file/function references. Be specific — not generic praise.
 
-Be precise. Label each claim as CONFIRMED (directly evidenced) or INFERRED (reasonably deduced). Do not speculate beyond the data. Use specific dates, counts, and facts from the data.`,
-    messages: [{ role: "user", content: context }],
-  });
+## BUGS & ISSUES
+List every bug, error, or broken pattern you can identify. For each: file name, what's wrong, severity (Critical/High/Medium/Low).
 
-  const text = message.content.find((b) => b.type === "text")?.text ?? "";
-  const hasConfirmed = text.includes("CONFIRMED");
-  return {
-    role: "researcher",
-    content: text,
-    confidenceLevel: hasConfirmed ? "confirmed" : "inferred",
-  };
+## SECURITY CONCERNS  
+Identify any security vulnerabilities: exposed secrets, SQL injection risk, unvalidated inputs, insecure dependencies.
+
+## CODE SMELLS & TECH DEBT
+Patterns that will cause problems at scale: duplicated logic, missing error handling, hardcoded values, etc.
+
+## QUICK WINS (under 2 hours each)
+List 3-5 specific, small code fixes that would meaningfully improve the project. For each: exact file, what to change, why it matters.`,
+    context,
+    2500
+  );
+  return { role: "researcher", content, confidenceLevel: "confirmed" };
 }
+
+// ─── Role 2: Improvement Roadmap ─────────────────────────────────────────────
+// Appears in "Code Analysis" tab — architecture + prioritized improvement plan
 
 async function runEngineeringReviewer(snapshot: RepoSnapshot, blind: boolean): Promise<CouncilFinding> {
   const context = buildContext(snapshot, blind);
+  const content = await gpt(
+    `You are Kee's Engineering Strategist. Assess the architecture and produce a prioritized improvement roadmap.
 
-  const message = await anthropic.messages.create({
-    model: "claude-opus-4-7",
-    max_tokens: 8192,
-    system: `You are the Engineering Reviewer on Kee's AI Council. You are a senior software architect evaluating a codebase for technical quality, scalability, and investment readiness.
+Your output must have these clearly labeled sections:
 
-Analyze the provided repository and produce a detailed engineering assessment covering:
-1. Architecture pattern (identify: monolith, microservices, layered, hexagonal, event-driven, etc.)
-2. Code quality signals (naming conventions, modularity, separation of concerns)
-3. Security posture (auth patterns, input validation, secret handling visible in code)
-4. Scalability architecture (stateless vs stateful, database patterns, caching)
-5. Test coverage signals (test file presence, testing frameworks, coverage patterns)
-6. CI/CD maturity (GitHub Actions, deployment configuration)
-7. Technical debt indicators
-8. Critical risks that would block commercialization
+## ARCHITECTURE ASSESSMENT
+How is the project structured? Is it scalable? What's the overall quality of the architecture (1-10) and why?
 
-Score: At the end of your analysis, provide a READINESS_SCORE: [0-100] and TECHNICAL_RISK: [low/medium/high].`,
-    messages: [{ role: "user", content: context }],
-  });
+## MISSING FOUNDATIONS
+What critical pieces are absent? (tests, CI/CD, error boundaries, logging, auth, rate limiting, etc.)
 
-  const text = message.content.find((b) => b.type === "text")?.text ?? "";
-  return {
-    role: "engineering_reviewer",
-    content: text,
-    confidenceLevel: text.toLowerCase().includes("confirmed") ? "confirmed" : "inferred",
-  };
+## IMPROVEMENT ROADMAP
+Prioritized list of improvements. For each item:
+- Priority: HIGH / MEDIUM / LOW
+- What: specific change
+- Why: business/technical impact
+- Effort: hours estimate
+
+## SCALE READINESS
+What would need to change for this to handle 10x users? 100x?
+
+## TECHNOLOGY EVALUATION
+Are the technology choices appropriate for the project's goals? Any recommendations to swap?`,
+    context,
+    2500
+  );
+  return { role: "engineering_reviewer", content, confidenceLevel: "inferred" };
 }
+
+// ─── Role 3: README / White Paper ────────────────────────────────────────────
+// Appears in "White Paper" tab — full professional README draft
 
 async function runProductAnalyst(snapshot: RepoSnapshot, blind: boolean): Promise<CouncilFinding> {
   const context = buildContext(snapshot, blind);
+  const content = await gpt(
+    `You are Kee's Documentation Writer. Your job is to write a complete, professional README.md for this project that Loretta can use immediately.
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 8192,
-    messages: [
-      {
-        role: "system",
-        content: `You are the Product Analyst on Kee's AI Council. You identify what software products actually do, who they serve, and what product gaps exist.
+Write a full README.md in proper Markdown. It must include:
 
-Analyze the provided repository and produce a product analysis covering:
-1. Core product hypothesis: What problem does this solve? For whom?
-2. User journey inference: What are the primary user flows? (infer from routes, components, or scripts)
-3. Feature completeness: What's built vs what's clearly missing?
-4. Onboarding gap: Is there a first-run experience?
-5. Monetization signals: Is there any payment, subscription, or pricing infrastructure?
-6. Product category: What product type is this? (Dev tool, B2B SaaS, consumer app, API, library, etc.)
-7. Ideal Customer Profile (ICP): Who would pay for this and why?
-8. Top 3 product improvements before market launch
+# [Project Name]
 
-Be decisive. Make calls even with incomplete data — label uncertain conclusions as INFERRED.`,
-      },
-      { role: "user", content: context },
-    ],
-  });
+A crisp one-line description.
 
-  const text = response.choices[0]?.message?.content ?? "";
-  return {
-    role: "product_analyst",
-    content: text,
-    confidenceLevel: "inferred",
-  };
+## What It Does
+Clear explanation of the product — what problem it solves, for whom.
+
+## Key Features
+Bullet list of the most impressive/useful features (infer from the code).
+
+## Tech Stack
+The actual technologies used (from the code).
+
+## Getting Started
+### Prerequisites
+### Installation
+### Configuration (env vars if any)
+### Running the Project
+
+## Architecture Overview
+Brief explanation of how the pieces fit together.
+
+## API Reference (if applicable)
+Key endpoints with method, path, description.
+
+## Roadmap
+3-5 natural next features based on the current state.
+
+## License
+Based on the repo's license file if present.
+
+---
+Write this as if it will be published on GitHub today. Make it compelling and accurate based on the actual code.`,
+    context,
+    3000
+  );
+  return { role: "product_analyst", content, confidenceLevel: "inferred" };
 }
+
+// ─── Role 4: Outreach Strategy ────────────────────────────────────────────────
+// Appears in "Outreach" tab — who to pitch, what to say
 
 async function runDocumentationSpecialist(snapshot: RepoSnapshot, blind: boolean): Promise<CouncilFinding> {
   const context = buildContext(snapshot, blind);
+  const content = await gpt(
+    `You are Kee's Outreach Strategist. Based on this software project, tell Loretta exactly who to pitch to and how.
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 8192,
-    messages: [
-      {
-        role: "system",
-        content: `You are the Documentation Specialist on Kee's AI Council. You assess how well a software project explains itself and whether it is investor- and buyer-ready from a knowledge transfer perspective.
+Your output must have these clearly labeled sections:
 
-Analyze the repository and produce a documentation assessment covering:
-1. README quality: Is it clear, complete, and compelling? Does it explain setup, usage, and purpose?
-2. Code documentation: Are key files, functions, and modules commented?
-3. API documentation: Are endpoints, inputs, and outputs documented?
-4. Contribution guide: Is there a CONTRIBUTING.md or equivalent?
-5. Changelog: Is there a CHANGELOG.md or release notes?
-6. Setup instructions: Can a developer clone and run this in under 10 minutes?
-7. Missing documentation gaps that would block enterprise adoption
-8. Documentation score: DOCUMENTATION_SCORE: [0-100]`,
-      },
-      { role: "user", content: context },
-    ],
-  });
+## WHO SHOULD BUY THIS
+Name specific types of companies (and real company examples if applicable) that would most benefit from this project. Explain why each is a fit.
 
-  const text = response.choices[0]?.message?.content ?? "";
-  return {
-    role: "documentation_specialist",
-    content: text,
-    confidenceLevel: "inferred",
-  };
+## ACQUISITION TARGETS
+Which companies might want to acquire this outright? Why would they pay for it? What's the strategic value to them?
+
+## INVESTOR PITCH ANGLE
+If raising funding, what's the one-sentence pitch? What category does this fit (SaaS, developer tool, marketplace, etc.)? Which types of investors (seed, Series A, strategic) are appropriate?
+
+## COLD OUTREACH TEMPLATE
+Write a short, compelling cold email Loretta can send to a potential buyer or partner. Keep it under 150 words. Make it specific to this project.
+
+## RECOMMENDED FIRST STEPS
+The 3 most important actions Loretta should take in the next 30 days to move this project toward a sale or partnership.`,
+    context,
+    2000
+  );
+  return { role: "documentation_specialist", content, confidenceLevel: "inferred" };
 }
+
+// ─── Role 5: Market Report ────────────────────────────────────────────────────
+// Appears in "Outreach" tab — market value, competitors, pricing
 
 async function runMarketEvaluator(snapshot: RepoSnapshot, blind: boolean): Promise<CouncilFinding> {
   const context = buildContext(snapshot, blind);
+  const content = await gpt(
+    `You are Kee's Market Analyst. Produce a market evaluation for this software project.
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 2048,
-    messages: [
-      {
-        role: "system",
-        content: `You are the Market Evaluator on Kee's AI Council. You are a venture-capital-trained market analyst who evaluates software assets for commercial potential.
+Your output must have these clearly labeled sections:
 
-Analyze the provided repository and produce a market evaluation covering:
-1. Market category identification: What market does this compete in?
-2. Total Addressable Market (TAM) estimate with reasoning
-3. Top 3-5 direct competitors (named companies/products) with pricing and traction
-4. Differentiation analysis: What unique advantage does this project have?
-5. Acquisition target profile: What type of company would acquire this and why?
-6. Revenue model options: SaaS, license, open-core, API credits, marketplace?
-7. Time-to-revenue estimate: How long to first dollar if properly resourced?
-8. Market timing: Is this ahead, in-time, or behind the market?
-9. OPPORTUNITY_SCORE: [0-100] — commercial opportunity strength
-10. ESTIMATED_MARKET_VALUE: [$X] — estimated fair acquisition value`,
-      },
-      { role: "user", content: context },
-    ],
-  });
+## MARKET CATEGORY
+What space does this compete in? (e.g., "Developer tooling / AI-assisted code review")
 
-  const text = response.choices[0]?.message?.content ?? "";
-  return {
-    role: "market_evaluator",
-    content: text,
-    confidenceLevel: "inferred",
-  };
+## MARKET SIZE
+Estimated TAM with reasoning. Be specific — cite comparable markets if possible.
+
+## DIRECT COMPETITORS
+List 3-5 real competitors with: name, pricing (if known), key differentiator vs this project.
+
+## THIS PROJECT'S EDGE
+What makes this worth paying for vs alternatives?
+
+## REVENUE MODEL OPTIONS
+Which monetization approach fits best and why: SaaS, usage-based, one-time license, open-core, marketplace?
+
+## VALUATION ESTIMATE
+OPPORTUNITY_SCORE: [0-100]
+ESTIMATED_MARKET_VALUE: [number in USD — what a buyer would pay today]
+ESTIMATED_BUILD_COST: [number in USD — what it would cost to build this from scratch]
+
+## TIME TO REVENUE
+If properly resourced, how long to first paying customer?`,
+    context,
+    2000
+  );
+  return { role: "market_evaluator", content, confidenceLevel: "inferred" };
 }
+
+// ─── Role 6: Kee's Summary (Governor) ────────────────────────────────────────
+// Appears in "Overview" tab — executive synthesis + all scores
 
 async function runGovernor(
   snapshot: RepoSnapshot,
   findings: CouncilFinding[]
 ): Promise<GovernorVerdict> {
   const findingsSummary = findings
-    .map(
-      (f) =>
-        `=== ${f.role.toUpperCase()} (confidence: ${f.confidenceLevel}) ===\n${f.content}`
-    )
+    .filter(f => !f.content.startsWith("[Role unavailable"))
+    .map((f) => `=== ${f.role.toUpperCase()} ===\n${f.content}`)
     .join("\n\n");
 
-  const message = await anthropic.messages.create({
-    model: "claude-opus-4-7",
-    max_tokens: 8192,
-    system: `You are the Governor on Kee's AI Council — the final arbiter and synthesizer. Your role is to:
-1. Review all council findings
-2. Identify agreements and contradictions between council members
-3. Produce a decisive, authoritative final verdict
-4. Assign calibrated scores based on the evidence
+  const raw = await gpt(
+    `You are Kee — a decisive cognitive partner and software intelligence. You have received analysis from your team on a software repository. Synthesize it into an executive briefing for Loretta.
 
-You must output your response in this EXACT format (do not deviate):
+Your response MUST follow this exact format:
 
 VERDICT:
-[Your 400-600 word synthesis of all findings. Be decisive and actionable. Note any contradictions between council members and how you resolved them.]
+[Write 300-500 words. Lead with the single most important insight about this project. What is it really? What's the opportunity? What's the risk? What should Loretta do first? Be decisive — no hedging. Write as Kee speaking directly to Loretta.]
 
 CONFIDENCE: [confirmed|inferred|unknown]
-VALUE_SCORE: [0-100]
-READINESS_SCORE: [0-100]
-OPPORTUNITY_SCORE: [0-100]
-ESTIMATED_MARKET_VALUE: [number in USD, no commas or symbols, e.g. 450000]
-ESTIMATED_BUILD_COST: [number in USD, no commas or symbols, e.g. 180000]
-INFERRED_DESCRIPTION: [one crisp sentence describing what this software does and for whom]
-PRIMARY_LANGUAGE: [the dominant programming language]
-TAGS: [comma-separated list of 3-6 relevant tags, e.g. saas,devtools,react,open-source]`,
-    messages: [
-      {
-        role: "user",
-        content: `Repository: ${snapshot.metadata.fullName}\n\nCOUNCIL FINDINGS:\n\n${findingsSummary}`,
-      },
-    ],
-  });
+VALUE_SCORE: [0-100 — overall quality and value of the asset]
+READINESS_SCORE: [0-100 — how ready is this to show to a buyer or investor]
+OPPORTUNITY_SCORE: [0-100 — commercial opportunity strength]
+ESTIMATED_MARKET_VALUE: [number in USD, no symbols, e.g. 450000]
+ESTIMATED_BUILD_COST: [number in USD, no symbols, e.g. 180000]
+INFERRED_DESCRIPTION: [one crisp sentence: what this software does and for whom]
+PRIMARY_LANGUAGE: [dominant programming language]
+TAGS: [3-6 comma-separated tags, e.g. saas,react,typescript,devtools]`,
+    `Repository: ${snapshot.metadata.fullName}\n\nTEAM ANALYSIS:\n\n${findingsSummary}`,
+    2000
+  );
 
-  const raw = message.content.find((b) => b.type === "text")?.text ?? "";
-
-  // Parse the structured output
   function extract(key: string): string {
     const match = raw.match(new RegExp(`${key}:\\s*(.+?)(?=\\n[A-Z_]+:|$)`, "s"));
     return match ? match[1].trim() : "";
   }
-
   function extractNum(key: string, fallback: number): number {
     const match = raw.match(new RegExp(`${key}:\\s*(\\d+)`));
     return match ? parseInt(match[1], 10) : fallback;
@@ -299,20 +314,12 @@ TAGS: [comma-separated list of 3-6 relevant tags, e.g. saas,devtools,react,open-
 
   const confidenceRaw = extract("CONFIDENCE").toLowerCase();
   const confidence: ConfidenceLevel =
-    confidenceRaw === "confirmed"
-      ? "confirmed"
-      : confidenceRaw === "inferred"
-      ? "inferred"
-      : "unknown";
+    confidenceRaw === "confirmed" ? "confirmed" : confidenceRaw === "inferred" ? "inferred" : "unknown";
 
-  const tags = extract("TAGS")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .slice(0, 6);
+  const tags = extract("TAGS").split(",").map((t) => t.trim()).filter(Boolean).slice(0, 6);
 
   return {
-    content: raw,
+    content: verdictText,
     confidenceLevel: confidence,
     valueScore: extractNum("VALUE_SCORE", 50),
     readinessScore: extractNum("READINESS_SCORE", 50),
@@ -325,13 +332,12 @@ TAGS: [comma-separated list of 3-6 relevant tags, e.g. saas,devtools,react,open-
   };
 }
 
-// ─── Main entry point ────────────────────────────────────────────────────────
+// ─── Main entry point ─────────────────────────────────────────────────────────
 
 export async function runFullCouncil(
   snapshot: RepoSnapshot,
   blind: boolean
 ): Promise<{ findings: CouncilFinding[]; verdict: GovernorVerdict }> {
-  // Run all five council members in parallel — fault-tolerant: one failure won't sink the rest
   const results = await Promise.allSettled([
     runResearcher(snapshot, blind),
     runEngineeringReviewer(snapshot, blind),
@@ -358,8 +364,6 @@ export async function runFullCouncil(
     };
   });
 
-  // Governor synthesizes everything (even partial results)
   const verdict = await runGovernor(snapshot, findings);
-
   return { findings, verdict };
 }

@@ -3,18 +3,14 @@ import { Link, useLocation } from 'wouter';
 import { 
   Home, 
   Briefcase, 
-  Archive, 
-  History, 
-  ListTodo,
+  Archive,
 } from 'lucide-react';
 import avatarUrl from '@assets/1783969794751_1784416923551.png';
 
 const navItems = [
   { href: '/', icon: Home, label: 'Companion' },
-  { href: '/dashboard', icon: Briefcase, label: 'Portfolio Dashboard' },
-  { href: '/vault', icon: Archive, label: 'Master Vault' },
-  { href: '/audit', icon: History, label: 'Change Audit' },
-  { href: '/tasks', icon: ListTodo, label: 'Task Queue' },
+  { href: '/dashboard', icon: Briefcase, label: 'Portfolio' },
+  { href: '/vault', icon: Archive, label: 'Vault' },
 ];
 
 interface SidebarProps {

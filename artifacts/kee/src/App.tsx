@@ -9,8 +9,6 @@ import Companion from '@/pages/companion';
 import Dashboard from '@/pages/dashboard';
 import ProjectDetail from '@/pages/project-detail';
 import Vault from '@/pages/vault';
-import Audit from '@/pages/audit';
-import Tasks from '@/pages/tasks';
 
 const queryClient = new QueryClient();
 
@@ -22,8 +20,6 @@ function Router() {
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/projects/:id" component={ProjectDetail} />
         <Route path="/vault" component={Vault} />
-        <Route path="/audit" component={Audit} />
-        <Route path="/tasks" component={Tasks} />
         <Route component={NotFound} />
       </Switch>
     </Shell>
