@@ -4,7 +4,6 @@ import {
   useGetProject,
   useGetProjectAnalyses,
   useAnalyzeProject,
-  customFetch,
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Play, ExternalLink, Github, Loader2, AlertCircle, RefreshCw, Copy, Check, Send, MessageSquare } from 'lucide-react';
@@ -41,11 +40,12 @@ function ChatPanel({ projectId }: { projectId: number }) {
     setInput('');
     setLoading(true);
     try {
-      const data = await customFetch<{ reply: string }>(`/api/projects/${projectId}/chat`, {
+      const res = await fetch(`/api/projects/${projectId}/chat`, {
         method: 'POST',
         body: JSON.stringify({ message: text, history }),
         headers: { 'Content-Type': 'application/json' },
       });
+      const data = await res.json() as { reply: string };
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
