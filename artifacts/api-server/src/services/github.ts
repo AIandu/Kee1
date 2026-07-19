@@ -3,7 +3,7 @@ import { Octokit } from "@octokit/rest";
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
 export function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
-  const match = url.match(/github\.com[\/:]([^\/]+)\/([^\/\s]+?)(?:\.git)?(?:\/|$)?/);
+  const match = url.match(/github\.com[\/:]([^\/]+)\/([^\/\s#?]+?)(?:\.git)?(?:[\/\s#?]|$)/);
   if (!match) return null;
   return { owner: match[1], repo: match[2] };
 }
