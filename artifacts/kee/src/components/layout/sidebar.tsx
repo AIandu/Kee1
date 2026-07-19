@@ -5,8 +5,7 @@ import {
   Briefcase, 
   Archive, 
   History, 
-  ListTodo, 
-  Users
+  ListTodo,
 } from 'lucide-react';
 import avatarUrl from '@assets/1783969794751_1784416923551.png';
 
@@ -16,7 +15,6 @@ const navItems = [
   { href: '/vault', icon: Archive, label: 'Master Vault' },
   { href: '/audit', icon: History, label: 'Change Audit' },
   { href: '/tasks', icon: ListTodo, label: 'Task Queue' },
-  { href: '/council', icon: Users, label: 'AI Council' },
 ];
 
 interface SidebarProps {

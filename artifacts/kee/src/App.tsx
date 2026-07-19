@@ -11,7 +11,6 @@ import ProjectDetail from '@/pages/project-detail';
 import Vault from '@/pages/vault';
 import Audit from '@/pages/audit';
 import Tasks from '@/pages/tasks';
-import Council from '@/pages/council';
 
 const queryClient = new QueryClient();
 
@@ -25,7 +24,6 @@ function Router() {
         <Route path="/vault" component={Vault} />
         <Route path="/audit" component={Audit} />
         <Route path="/tasks" component={Tasks} />
-        <Route path="/council" component={Council} />
         <Route component={NotFound} />
       </Switch>
     </Shell>

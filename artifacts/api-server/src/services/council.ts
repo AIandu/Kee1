@@ -1,11 +1,9 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenAI } from "@google/genai";
 import type { RepoSnapshot } from "./github.js";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export type CouncilRole =
   | "researcher"
@@ -209,14 +207,13 @@ Analyze the repository and produce a documentation assessment covering:
 async function runMarketEvaluator(snapshot: RepoSnapshot, blind: boolean): Promise<CouncilFinding> {
   const context = buildContext(snapshot, blind);
 
-  const result = await gemini.models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 2048,
+    messages: [
       {
-        role: "user",
-        parts: [
-          {
-            text: `You are the Market Evaluator on Kee's AI Council. You are a venture-capital-trained market analyst who evaluates software assets for commercial potential.
+        role: "system",
+        content: `You are the Market Evaluator on Kee's AI Council. You are a venture-capital-trained market analyst who evaluates software assets for commercial potential.
 
 Analyze the provided repository and produce a market evaluation covering:
 1. Market category identification: What market does this compete in?
@@ -228,17 +225,13 @@ Analyze the provided repository and produce a market evaluation covering:
 7. Time-to-revenue estimate: How long to first dollar if properly resourced?
 8. Market timing: Is this ahead, in-time, or behind the market?
 9. OPPORTUNITY_SCORE: [0-100] — commercial opportunity strength
-10. ESTIMATED_MARKET_VALUE: [$X] — estimated fair acquisition value
-
-Repository data:
-${context}`,
-          },
-        ],
+10. ESTIMATED_MARKET_VALUE: [$X] — estimated fair acquisition value`,
       },
+      { role: "user", content: context },
     ],
   });
 
-  const text = result.text ?? "";
+  const text = response.choices[0]?.message?.content ?? "";
   return {
     role: "market_evaluator",
     content: text,
@@ -338,19 +331,34 @@ export async function runFullCouncil(
   snapshot: RepoSnapshot,
   blind: boolean
 ): Promise<{ findings: CouncilFinding[]; verdict: GovernorVerdict }> {
-  // Run all five council members in parallel
-  const [researcher, engineeringReviewer, productAnalyst, docSpecialist, marketEvaluator] =
-    await Promise.all([
-      runResearcher(snapshot, blind),
-      runEngineeringReviewer(snapshot, blind),
-      runProductAnalyst(snapshot, blind),
-      runDocumentationSpecialist(snapshot, blind),
-      runMarketEvaluator(snapshot, blind),
-    ]);
+  // Run all five council members in parallel — fault-tolerant: one failure won't sink the rest
+  const results = await Promise.allSettled([
+    runResearcher(snapshot, blind),
+    runEngineeringReviewer(snapshot, blind),
+    runProductAnalyst(snapshot, blind),
+    runDocumentationSpecialist(snapshot, blind),
+    runMarketEvaluator(snapshot, blind),
+  ]);
 
-  const findings = [researcher, engineeringReviewer, productAnalyst, docSpecialist, marketEvaluator];
+  const roles: CouncilRole[] = [
+    "researcher",
+    "engineering_reviewer",
+    "product_analyst",
+    "documentation_specialist",
+    "market_evaluator",
+  ];
 
-  // Governor synthesizes everything
+  const findings: CouncilFinding[] = results.map((result, i) => {
+    if (result.status === "fulfilled") return result.value;
+    console.warn(`[council] ${roles[i]} failed:`, result.reason?.message ?? result.reason);
+    return {
+      role: roles[i],
+      content: `[Role unavailable: ${result.reason?.message ?? "unknown error"}]`,
+      confidenceLevel: "unknown" as ConfidenceLevel,
+    };
+  });
+
+  // Governor synthesizes everything (even partial results)
   const verdict = await runGovernor(snapshot, findings);
 
   return { findings, verdict };
