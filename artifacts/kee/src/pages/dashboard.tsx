@@ -96,7 +96,7 @@ export default function Dashboard() {
   const handleCreate = () => {
     if (!form.name.trim()) return;
     createMut.mutate(
-      { name: form.name, repoUrl: form.repoUrl || undefined, analysisMode: form.analysisMode as 'blind' | 'documented', description: form.description || undefined },
+      { data: { name: form.name, repoUrl: form.repoUrl || undefined, analysisMode: form.analysisMode as 'blind' | 'documented', description: form.description || undefined } },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: ['/api/dashboard/summary'] });
