@@ -348,7 +348,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {(summary?.topProjects ?? []).map((project, i) => (
+              {(projects ?? summary?.topProjects ?? []).map((project, i) => (
                 <motion.tr
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
