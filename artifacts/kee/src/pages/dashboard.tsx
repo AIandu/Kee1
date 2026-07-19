@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useGetDashboardSummary, useCreateProject, useListProjects } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
 import { ArrowUpRight, BarChart3, Briefcase, FileCode2, Plus, Target, Github, Search, Loader2, Lock, Globe } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -52,6 +52,7 @@ export default function Dashboard() {
   const createMut = useCreateProject();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
 
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<'pick' | 'form'>('pick');
@@ -338,12 +339,12 @@ export default function Dashboard() {
           <table className="w-full text-left text-sm">
             <thead className="bg-muted/50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Project</th>
-                <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Status</th>
-                <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Value Score</th>
-                <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Readiness</th>
-                <th className="px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium text-right">Est. Value</th>
-                <th className="px-6 py-4" />
+                <th className="px-4 py-4 sm:px-6 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Project</th>
+                <th className="px-4 py-4 sm:px-6 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Status</th>
+                <th className="hidden sm:table-cell px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Value Score</th>
+                <th className="hidden md:table-cell px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium">Readiness</th>
+                <th className="hidden lg:table-cell px-6 py-4 font-mono text-xs text-muted-foreground uppercase tracking-wider font-medium text-right">Est. Value</th>
+                <th className="px-4 py-4 sm:px-6" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -353,13 +354,14 @@ export default function Dashboard() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
                   key={project.id}
-                  className="hover:bg-muted/30 transition-colors group"
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                  className="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer"
                 >
-                  <td className="px-6 py-4">
+                  <td className="px-4 py-4 sm:px-6">
                     <div className="font-medium text-foreground">{project.name}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">{project.primaryLanguage || '—'}</div>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 py-4 sm:px-6">
                     <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
                       project.status === 'ready_for_market' ? 'bg-primary/10 text-primary' :
                       project.status === 'analyzed' ? 'bg-secondary/20 text-secondary-foreground' :
@@ -370,25 +372,23 @@ export default function Dashboard() {
                       {project.status.replace(/_/g, ' ')}
                     </span>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="hidden sm:table-cell px-6 py-4">
                     <div className="flex items-center gap-2">
                       <span className="font-mono w-6 text-xs">{project.valueScore ?? '—'}</span>
                       <Progress value={project.valueScore ?? 0} className="w-16 h-1.5" />
                     </div>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="hidden md:table-cell px-6 py-4">
                     <div className="flex items-center gap-2">
                       <span className="font-mono w-6 text-xs">{project.readinessScore ?? '—'}</span>
                       <Progress value={project.readinessScore ?? 0} className="w-16 h-1.5 [&>div]:bg-secondary" />
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-right font-mono text-sm">
+                  <td className="hidden lg:table-cell px-6 py-4 text-right font-mono text-sm">
                     {formatCurrency(project.estimatedMarketValue)}
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    <Link href={`/projects/${project.id}`} className="inline-flex p-2 hover:bg-background rounded-md text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100">
-                      <ArrowUpRight className="w-4 h-4" />
-                    </Link>
+                  <td className="px-4 py-4 sm:px-6 text-right">
+                    <ArrowUpRight className="w-4 h-4 text-muted-foreground inline-block" />
                   </td>
                 </motion.tr>
               ))}
