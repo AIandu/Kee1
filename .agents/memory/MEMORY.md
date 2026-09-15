@@ -1,2 +1,3 @@
 - [AI Council architecture](ai-council.md) — six-role council uses Anthropic/OpenAI/Gemini directly with user's own API keys; role-to-model routing is fixed
 - [GitHub ingestion](github-ingestion.md) — smart file selector, up to 12 key files, 30K char cap; analysis runs async, 202 response immediately
+- [Evidence-first analysis](evidence-first-analysis.md) — cite executable/configuration evidence; unsupported claims and values stay UNKNOWN

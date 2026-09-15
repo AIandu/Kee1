@@ -547,7 +547,6 @@ export const GetDashboardSummaryResponse = zod.object({
   "analyzedProjects": zod.number(),
   "pendingTasks": zod.number(),
   "vaultEntries": zod.number(),
-  "totalEstimatedValue": zod.number(),
   "avgValueScore": zod.number().nullish(),
   "avgReadinessScore": zod.number().nullish(),
   "topProjects": zod.array(zod.object({

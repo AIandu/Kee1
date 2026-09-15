@@ -44,11 +44,11 @@ export class InsufficientRepositoryDataError extends Error {
 const EVIDENCE_RULES = `
 EVIDENCE GOVERNANCE — NON-NEGOTIABLE:
 - Every technical claim must cite an exact repository path in square brackets, for example [src/index.ts].
-- Label statements as VERIFIED, INFERENCE, or UNKNOWN.
-- VERIFIED means the supplied file content directly supports the statement.
-- INFERENCE means a clearly labeled interpretation of supplied evidence; cite the supporting paths.
+- Separate the response into VERIFIED, INFERRED, and UNKNOWN sections.
+- VERIFIED means executable or configuration file content directly supports the statement.
+- INFERRED means a clearly labeled interpretation of supplied file evidence; cite the supporting paths.
 - UNKNOWN means the supplied repository evidence does not establish the statement. Say UNKNOWN instead of guessing.
-- Never use README prose, tags, repository descriptions, stars, or market assumptions as proof that code works.
+- README prose may document a project, but cannot prove what the software does or that code works. Tags, repository descriptions, stars, and market assumptions are not technical evidence.
 - Never claim users, revenue, traffic, certifications, uptime, integrations, deployment, or live functionality unless supplied evidence explicitly verifies it.
 - Do not produce generic strengths, risks, scores, valuations, buyer recommendations, or documents without cited repository evidence.
 `;
@@ -361,9 +361,9 @@ ${findingsSummary}`,
   return {
     content: verdictText,
     confidenceLevel: confidence,
-    valueScore: extractNum("VALUE_SCORE", 50),
-    readinessScore: extractNum("READINESS_SCORE", 50),
-    opportunityScore: extractNum("OPPORTUNITY_SCORE", 50),
+    valueScore: extractNum("VALUE_SCORE", 0),
+    readinessScore: extractNum("READINESS_SCORE", 0),
+    opportunityScore: extractNum("OPPORTUNITY_SCORE", 0),
     estimatedMarketValue: extractNum("ESTIMATED_MARKET_VALUE", 0),
     estimatedBuildCost: extractNum("ESTIMATED_BUILD_COST", 0),
     tags,

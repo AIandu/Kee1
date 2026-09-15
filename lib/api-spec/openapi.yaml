@@ -863,7 +863,7 @@ components:
 
     DashboardSummary:
       type: object
-      required: [totalProjects, analyzedProjects, pendingTasks, vaultEntries, topProjects, totalEstimatedValue]
+      required: [totalProjects, analyzedProjects, pendingTasks, vaultEntries, topProjects]
       properties:
         totalProjects:
           type: integer
@@ -872,8 +872,6 @@ components:
         pendingTasks:
           type: integer
         vaultEntries:
-          type: integer
-        totalEstimatedValue:
           type: integer
         avgValueScore:
           type: ["number", "null"]

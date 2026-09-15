@@ -425,7 +425,6 @@ export interface DashboardSummary {
   analyzedProjects: number;
   pendingTasks: number;
   vaultEntries: number;
-  totalEstimatedValue: number;
   /** @nullable */
   avgValueScore?: number | null;
   /** @nullable */
