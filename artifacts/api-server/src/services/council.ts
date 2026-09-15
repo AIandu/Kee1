@@ -30,7 +30,28 @@ export interface GovernorVerdict {
   tags: string[];
   inferredDescription: string;
   primaryLanguage: string;
+  classification: "sell" | "hold" | "develop" | "unreviewed";
+  valuationBasis: string;
 }
+
+export class InsufficientRepositoryDataError extends Error {
+  constructor() {
+    super("Insufficient repository data.");
+    this.name = "InsufficientRepositoryDataError";
+  }
+}
+
+const EVIDENCE_RULES = `
+EVIDENCE GOVERNANCE — NON-NEGOTIABLE:
+- Every technical claim must cite an exact repository path in square brackets, for example [src/index.ts].
+- Label statements as VERIFIED, INFERENCE, or UNKNOWN.
+- VERIFIED means the supplied file content directly supports the statement.
+- INFERENCE means a clearly labeled interpretation of supplied evidence; cite the supporting paths.
+- UNKNOWN means the supplied repository evidence does not establish the statement. Say UNKNOWN instead of guessing.
+- Never use README prose, tags, repository descriptions, stars, or market assumptions as proof that code works.
+- Never claim users, revenue, traffic, certifications, uptime, integrations, deployment, or live functionality unless supplied evidence explicitly verifies it.
+- Do not produce generic strengths, risks, scores, valuations, buyer recommendations, or documents without cited repository evidence.
+`;
 
 function buildContext(snapshot: RepoSnapshot, blind: boolean): string {
   const fileSection = snapshot.keyFiles
@@ -79,7 +100,7 @@ async function gpt(system: string, user: string, maxTokens = 2000): Promise<stri
     model: "gpt-4o",
     max_tokens: maxTokens,
     messages: [
-      { role: "system", content: system },
+      { role: "system", content: `${EVIDENCE_RULES}\n${system}` },
       { role: "user", content: user },
     ],
   });

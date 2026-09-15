@@ -31,6 +31,7 @@ export const analysesTable = pgTable("analyses", {
     .references(() => projectsTable.id, { onDelete: "cascade" }),
   role: councilRoleEnum("role").notNull(),
   content: text("content").notNull(),
+  commitSha: text("commit_sha"),
   confidenceLevel: confidenceLevelEnum("confidence_level").notNull().default("inferred"),
   governorStatus: governorStatusEnum("governor_status").notNull().default("pending"),
   governorNote: text("governor_note"),

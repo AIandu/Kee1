@@ -32,6 +32,7 @@ export interface RepoSnapshot {
     defaultBranch: string;
     license: string | null;
     size: number;
+    latestCommitSha: string | null;
   };
   languages: Record<string, number>;
   fileTree: string[];
@@ -39,6 +40,26 @@ export interface RepoSnapshot {
   recentCommits: Array<{ message: string; date: string; author: string }>;
   openPRs: number;
 }
+
+export type SaleReadinessCheck = {
+  status: "verified" | "not_found" | "risk" | "unknown";
+  evidence: string[];
+  note: string;
+};
+
+export type SaleReadinessReport = {
+  readme: SaleReadinessCheck;
+  license: SaleReadinessCheck;
+  buildConfiguration: SaleReadinessCheck;
+  tests: SaleReadinessCheck;
+  deploymentInstructions: SaleReadinessCheck;
+  environmentVariableDocumentation: SaleReadinessCheck;
+  exposedSecretRisk: SaleReadinessCheck;
+  placeholderOrDemoData: SaleReadinessCheck;
+  brokenIntegrations: SaleReadinessCheck;
+  unsupportedMarketingClaims: SaleReadinessCheck;
+  requiredBeforeSale: string[];
+};
 
 // Priority file patterns — ordered by importance
 const PRIORITY_PATTERNS = [
@@ -227,6 +248,7 @@ export async function fetchRepoSnapshot(
       defaultBranch: branch,
       license: r.license?.spdx_id ?? null,
       size: r.size ?? 0,
+      latestCommitSha: commitsData.data[0]?.sha ?? null,
     },
     languages: languagesData.data as Record<string, number>,
     fileTree,
@@ -234,6 +256,105 @@ export async function fetchRepoSnapshot(
     recentCommits,
     openPRs,
   };
+}
+
+function firstMatching(paths: string[], patterns: RegExp[]): string[] {
+  return paths.filter((path) => patterns.some((pattern) => pattern.test(path)));
+}
+
+function contentMatches(files: RepoFile[], pattern: RegExp): string[] {
+  return files.filter((file) => pattern.test(file.content)).map((file) => file.path);
+}
+
+export function buildSaleReadiness(snapshot: RepoSnapshot): SaleReadinessReport {
+  const paths = snapshot.fileTree;
+  const files = snapshot.keyFiles;
+  const readmes = firstMatching(paths, [/^README(?:\.(md|txt|rst))?$/i]);
+  const licenses = firstMatching(paths, [/^LICEN[CS]E(?:\..*)?$/i, /^COPYING(?:\..*)?$/i]);
+  const builds = firstMatching(paths, [
+    /^package\.json$/i,
+    /^requirements\.txt$/i,
+    /^pyproject\.toml$/i,
+    /^go\.mod$/i,
+    /^Cargo\.toml$/i,
+    /^Makefile$/i,
+    /^Dockerfile$/i,
+    /^docker-compose\.ya?ml$/i,
+  ]);
+  const tests = firstMatching(paths, [
+    /(^|\/)(__tests__|tests?|specs?)(\/|$)/i,
+    /\.(test|spec)\.[^.]+$/i,
+  ]);
+  const deployment = firstMatching(paths, [
+    /^\.github\/workflows\//i,
+    /^Dockerfile$/i,
+    /^(render|railway|fly|vercel|netlify)\.(json|ya?ml)$/i,
+    /^docker-compose\.ya?ml$/i,
+  ]);
+  const envDocs = firstMatching(paths, [
+    /^\.env\.example$/i,
+    /^\.env\.template$/i,
+    /(^|\/)CONFIGURATION(?:\..*)?$/i,
+  ]);
+
+  const secretEvidence = contentMatches(
+    files,
+    /(sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|-----BEGIN (?:RSA |EC )?PRIVATE KEY-----|AKIA[0-9A-Z]{16})/
+  );
+  const placeholderEvidence = contentMatches(
+    files,
+    /\b(TODO|FIXME|lorem ipsum|placeholder|demo data|sample data|mock data|coming soon)\b/i
+  );
+
+  const makeCheck = (
+    status: SaleReadinessCheck["status"],
+    evidence: string[],
+    note: string
+  ): SaleReadinessCheck => ({ status, evidence, note });
+
+  const report: SaleReadinessReport = {
+    readme: readmes.length
+      ? makeCheck("verified", readmes, "README file exists.")
+      : makeCheck("not_found", [], "No README file was found in the repository tree."),
+    license: licenses.length || snapshot.metadata.license
+      ? makeCheck("verified", licenses.length ? licenses : ["GitHub repository metadata"], "A license is present.")
+      : makeCheck("not_found", [], "No license file or GitHub license metadata was found."),
+    buildConfiguration: builds.length
+      ? makeCheck("verified", builds, "A recognizable build or dependency configuration exists.")
+      : makeCheck("not_found", [], "No recognizable build configuration was found."),
+    tests: tests.length
+      ? makeCheck("verified", tests.slice(0, 10), "Test-looking paths were found; execution was not performed.")
+      : makeCheck("unknown", [], "No test paths were found in the sampled repository tree."),
+    deploymentInstructions: deployment.length
+      ? makeCheck("verified", deployment.slice(0, 10), "Deployment-related configuration was found; deployment was not verified.")
+      : makeCheck("unknown", [], "No deployment configuration or instructions were found in the sampled tree."),
+    environmentVariableDocumentation: envDocs.length
+      ? makeCheck("verified", envDocs, "Environment-variable documentation or a template exists.")
+      : makeCheck("unknown", [], "No environment-variable documentation was found."),
+    exposedSecretRisk: secretEvidence.length
+      ? makeCheck("risk", secretEvidence, "A secret-like value was detected in sampled file contents; rotate and investigate it.")
+      : makeCheck("verified", [], "No common secret patterns were detected in sampled file contents; this is not proof of safety."),
+    placeholderOrDemoData: placeholderEvidence.length
+      ? makeCheck("risk", placeholderEvidence, "Placeholder or demo-data markers were detected.")
+      : makeCheck("unknown", [], "No placeholder markers were detected in sampled files; absence is not proof of production data."),
+    brokenIntegrations: makeCheck("unknown", [], "Repository inspection cannot prove that external integrations work at runtime."),
+    unsupportedMarketingClaims: makeCheck("unknown", [], "Repository inspection cannot validate marketing claims without independent evidence."),
+    requiredBeforeSale: [],
+  };
+
+  const required: string[] = [];
+  if (report.readme.status !== "verified") required.push("Add or complete a README with setup and product facts.");
+  if (report.license.status !== "verified") required.push("Add a clear license.");
+  if (report.buildConfiguration.status !== "verified") required.push("Add a reproducible build configuration.");
+  if (report.tests.status !== "verified") required.push("Add and run a documented test suite.");
+  if (report.deploymentInstructions.status !== "verified") required.push("Document deployment and operating requirements.");
+  if (report.environmentVariableDocumentation.status !== "verified") required.push("Document required environment variables without including secrets.");
+  if (report.exposedSecretRisk.status === "risk") required.push("Remove and rotate any exposed secrets before sale.");
+  if (report.placeholderOrDemoData.status === "risk") required.push("Remove or clearly label placeholder and demo data.");
+  required.push("Independently verify integrations and marketing claims before listing.");
+  if (!snapshot.metadata.latestCommitSha) required.push("Confirm the repository has a real commit history.");
+  report.requiredBeforeSale = required;
+  return report;
 }
 
 export async function listUserRepos(
