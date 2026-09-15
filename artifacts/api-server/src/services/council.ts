@@ -319,8 +319,10 @@ CONFIDENCE: [confirmed|inferred|unknown — confirmed means you saw substantial 
 VALUE_SCORE: [0-100 — honest quality and completeness score. Most indie projects score 20-60. A polished, well-tested, documented project scores 70+. Perfect code with users = 85+]
 READINESS_SCORE: [0-100 — could Loretta show this to a buyer TODAY without embarrassment? Be harsh here.]
 OPPORTUNITY_SCORE: [0-100 — commercial potential of the concept and execution combined]
-ESTIMATED_MARKET_VALUE: [integer USD — what a real buyer would pay today. Most indie repos: $3,000-$50,000. Polished SaaS with users: $50,000-$500,000. Only use higher numbers if the team analysis found clear evidence of revenue or strategic value. Base it on the market evaluator's MID estimate.]
-ESTIMATED_BUILD_COST: [integer USD — freelancer cost to rebuild from scratch. Be realistic.]
+ESTIMATED_MARKET_VALUE: [integer USD only when repository evidence supports an estimate; otherwise 0. This is an estimate, never an appraisal or guaranteed price.]
+ESTIMATED_BUILD_COST: [integer USD only when repository evidence supports an estimate; otherwise 0.]
+CLASSIFICATION: [sell|hold|develop|unreviewed — choose unreviewed when evidence is insufficient]
+VALUATION_BASIS: [short evidence-backed explanation with exact file citations, or UNKNOWN]
 INFERRED_DESCRIPTION: [one crisp sentence: what this software does and for whom]
 PRIMARY_LANGUAGE: [dominant programming language]
 TAGS: [3-6 comma-separated lowercase tags, e.g. saas,react,typescript,devtools]`,
@@ -350,6 +352,11 @@ ${findingsSummary}`,
     confidenceRaw === "confirmed" ? "confirmed" : confidenceRaw === "inferred" ? "inferred" : "unknown";
 
   const tags = extract("TAGS").split(",").map((t) => t.trim()).filter(Boolean).slice(0, 6);
+  const classificationRaw = extract("CLASSIFICATION").toLowerCase();
+  const classification =
+    classificationRaw === "sell" || classificationRaw === "hold" || classificationRaw === "develop"
+      ? classificationRaw
+      : "unreviewed";
 
   return {
     content: verdictText,
@@ -362,6 +369,8 @@ ${findingsSummary}`,
     tags,
     inferredDescription: extract("INFERRED_DESCRIPTION"),
     primaryLanguage: extract("PRIMARY_LANGUAGE"),
+    classification,
+    valuationBasis: extract("VALUATION_BASIS"),
   };
 }
 
@@ -371,6 +380,9 @@ export async function runFullCouncil(
   snapshot: RepoSnapshot,
   blind: boolean
 ): Promise<{ findings: CouncilFinding[]; verdict: GovernorVerdict }> {
+  if (snapshot.fileTree.length === 0 || snapshot.keyFiles.length === 0) {
+    throw new InsufficientRepositoryDataError();
+  }
   const results = await Promise.allSettled([
     runResearcher(snapshot, blind),
     runEngineeringReviewer(snapshot, blind),

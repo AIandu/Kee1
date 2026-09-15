@@ -12,18 +12,139 @@ import {
   GetProjectAnalysesParams,
   GetProjectRelationshipsParams,
 } from "@workspace/api-zod";
-import { parseGitHubUrl, fetchRepoSnapshot } from "../services/github.js";
-import { runFullCouncil } from "../services/council.js";
+import { parseGitHubUrl, fetchRepoSnapshot, buildSaleReadiness } from "../services/github.js";
+import { runFullCouncil, InsufficientRepositoryDataError } from "../services/council.js";
 
 const router: IRouter = Router();
 
-// List all projects ordered by value score descending
-router.get("/projects", async (_req, res): Promise<void> => {
+function effectiveClassification(project: { classification: string; classificationOverride: string | null }) {
+  return project.classificationOverride ?? project.classification;
+}
+
+function normalize(value: string | null | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// List all projects ordered by effective value score descending.
+router.get("/projects", async (req, res): Promise<void> => {
   const projects = await db
     .select()
     .from(projectsTable)
     .orderBy(desc(sql`coalesce(${projectsTable.valueScore}, 0)`));
-  res.json(projects);
+  const q = String(req.query.q ?? "").trim().toLowerCase();
+  const owner = String(req.query.owner ?? "").trim().toLowerCase();
+  const classification = String(req.query.classification ?? "").trim().toLowerCase();
+  const status = String(req.query.status ?? "").trim().toLowerCase();
+  const minReadiness = Number(req.query.minReadiness ?? "");
+
+  const filtered = projects.filter((project) => {
+    const searchable = [project.name, project.repoUrl, project.githubOwner, project.githubRepository, project.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const readiness = project.readinessOverride ?? project.readinessScore ?? 0;
+    return (
+      (!q || searchable.includes(q)) &&
+      (!owner || (project.githubOwner ?? "").toLowerCase().includes(owner)) &&
+      (!classification || effectiveClassification(project) === classification) &&
+      (!status || project.status === status) &&
+      (!Number.isFinite(minReadiness) || readiness >= minReadiness)
+    );
+  });
+
+  const possibleDuplicates = new Map<number, number[]>();
+  for (const project of projects) {
+    const matches = projects
+      .filter((other) => {
+        if (other.id === project.id) return false;
+        const sameRepo = normalize(other.githubRepository) && normalize(other.githubRepository) === normalize(project.githubRepository);
+        const sameName = normalize(other.name) && normalize(other.name) === normalize(project.name);
+        const sameAlias = (other.aliases ?? []).some((alias) =>
+          (project.aliases ?? []).some((ownAlias) => normalize(alias) === normalize(ownAlias))
+        );
+        return Boolean(sameRepo || sameName || sameAlias);
+      })
+      .map((other) => other.id);
+    possibleDuplicates.set(project.id, matches);
+  }
+
+  res.json(filtered.map((project) => ({
+    ...project,
+    effectiveValue: project.valueOverride ?? project.estimatedMarketValue ?? project.valueScore,
+    effectiveReadiness: project.readinessOverride ?? project.readinessScore,
+    effectiveClassification: effectiveClassification(project),
+    possibleDuplicateIds: possibleDuplicates.get(project.id) ?? [],
+  })));
+});
+
+function csvCell(value: unknown): string {
+  const text = value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
+  return `"${text.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+}
+
+router.get("/projects/export", async (req, res): Promise<void> => {
+  const projects = await db.select().from(projectsTable).orderBy(desc(projectsTable.updatedAt));
+  const analyses = await db.select().from(analysesTable).orderBy(desc(analysesTable.createdAt));
+  const analysesByProject = new Map<number, typeof analyses>();
+  for (const analysis of analyses) {
+    const list = analysesByProject.get(analysis.projectId) ?? [];
+    list.push(analysis);
+    analysesByProject.set(analysis.projectId, list);
+  }
+  const rows = projects.map((project) => {
+    const evidence = (analysesByProject.get(project.id) ?? [])
+      .filter((analysis) => analysis.role === "governor" || analysis.role === "researcher")
+      .map((analysis) => analysis.content)
+      .join("\n")
+      .slice(0, 4000);
+    return {
+      project: project.name,
+      owner: project.githubOwner,
+      repository: project.githubRepository,
+      sha: project.analyzedCommitSha ?? project.latestCommitSha,
+      classification: effectiveClassification(project),
+      score: project.valueScore,
+      value: project.valueOverride ?? project.estimatedMarketValue,
+      readiness: project.readinessOverride ?? project.readinessScore,
+      opportunity: project.opportunityScore,
+      evidence,
+      issue: project.analysisError,
+      checklist: project.saleReadiness,
+      liveProductVerified: project.liveProductVerified,
+      analyses: analysesByProject.get(project.id) ?? [],
+    };
+  });
+
+  const format = String(req.query.format ?? "json").toLowerCase();
+  if (format === "csv") {
+    const headers = [
+      "project", "owner", "repository", "sha", "classification", "score", "value",
+      "readiness", "opportunity", "evidence", "issue", "checklist_readme",
+      "checklist_license", "checklist_build", "checklist_tests", "checklist_deployment",
+      "checklist_env_docs", "checklist_secret_risk", "checklist_placeholders",
+      "checklist_required_before_sale", "live_product_verified",
+    ];
+    const csvRows = rows.map((row) => {
+      const checklist = (row.checklist ?? {}) as Record<string, unknown>;
+      return [
+        row.project, row.owner, row.repository, row.sha, row.classification, row.score,
+        row.value, row.readiness, row.opportunity, row.evidence, row.issue,
+        (checklist.readme as { status?: string } | undefined)?.status,
+        (checklist.license as { status?: string } | undefined)?.status,
+        (checklist.buildConfiguration as { status?: string } | undefined)?.status,
+        (checklist.tests as { status?: string } | undefined)?.status,
+        (checklist.deploymentInstructions as { status?: string } | undefined)?.status,
+        (checklist.environmentVariableDocumentation as { status?: string } | undefined)?.status,
+        (checklist.exposedSecretRisk as { status?: string } | undefined)?.status,
+        (checklist.placeholderOrDemoData as { status?: string } | undefined)?.status,
+        checklist.requiredBeforeSale,
+        row.liveProductVerified,
+      ].map(csvCell).join(",");
+    });
+    res.type("text/csv").attachment("kee-portfolio.csv").send([headers.map(csvCell).join(","), ...csvRows].join("\n"));
+    return;
+  }
+  res.json(rows);
 });
 
 // Create project
@@ -38,6 +159,14 @@ router.post("/projects", async (req, res): Promise<void> => {
     .values({
       name: parsed.data.name,
       repoUrl: parsed.data.repoUrl ?? null,
+      githubOwner: parsed.data.repoUrl ? parseGitHubUrl(parsed.data.repoUrl)?.owner ?? null : null,
+      githubRepository: parsed.data.repoUrl ? parseGitHubUrl(parsed.data.repoUrl)?.repo ?? null : null,
+      aliases: [
+        parsed.data.name,
+        ...(parsed.data.repoUrl && parseGitHubUrl(parsed.data.repoUrl)?.repo
+          ? [parseGitHubUrl(parsed.data.repoUrl)!.repo]
+          : []),
+      ],
       description: parsed.data.description ?? null,
       analysisMode: (parsed.data.analysisMode as "blind" | "documented") ?? "blind",
       tags: parsed.data.tags ?? [],
@@ -57,6 +186,47 @@ router.post("/projects", async (req, res): Promise<void> => {
 });
 
 // Get project by id
+router.get("/projects/:id/repository-status", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (!project.repoUrl) {
+    res.json({ changed: false, latestCommitSha: null, analyzedCommitSha: project.analyzedCommitSha });
+    return;
+  }
+  const coords = parseGitHubUrl(project.repoUrl);
+  if (!coords) {
+    res.status(422).json({ error: "Could not parse GitHub URL." });
+    return;
+  }
+  try {
+    const snapshot = await fetchRepoSnapshot(coords.owner, coords.repo);
+    await db.update(projectsTable)
+      .set({ latestCommitSha: snapshot.metadata.latestCommitSha, updatedAt: new Date() })
+      .where(eq(projectsTable.id, id));
+    const changed = Boolean(
+      project.analyzedCommitSha &&
+      snapshot.metadata.latestCommitSha &&
+      project.analyzedCommitSha !== snapshot.metadata.latestCommitSha
+    );
+    res.json({
+      changed,
+      latestCommitSha: snapshot.metadata.latestCommitSha,
+      analyzedCommitSha: project.analyzedCommitSha,
+      message: changed ? "Repository changed—reanalyze?" : "Repository unchanged.",
+    });
+  } catch {
+    res.status(422).json({ error: "Insufficient repository data." });
+  }
+});
+
 router.get("/projects/:id", async (req, res): Promise<void> => {
   const params = GetProjectParams.safeParse(req.params);
   if (!params.success) {
@@ -69,6 +239,10 @@ router.get("/projects/:id", async (req, res): Promise<void> => {
     .where(eq(projectsTable.id, params.data.id));
   if (!project) {
     res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (project.status === "analyzing") {
+    res.status(409).json({ error: "An analysis is already running for this project." });
     return;
   }
   res.json(project);
@@ -96,7 +270,21 @@ router.patch("/projects/:id", async (req, res): Promise<void> => {
   if (parsed.data.opportunityScore !== undefined) updateData.opportunityScore = parsed.data.opportunityScore;
   if (parsed.data.estimatedBuildCost !== undefined) updateData.estimatedBuildCost = parsed.data.estimatedBuildCost;
   if (parsed.data.estimatedMarketValue !== undefined) updateData.estimatedMarketValue = parsed.data.estimatedMarketValue;
+  if (parsed.data.valueOverride !== undefined) updateData.valueOverride = parsed.data.valueOverride;
+  if (parsed.data.readinessOverride !== undefined) updateData.readinessOverride = parsed.data.readinessOverride;
+  if (parsed.data.classificationOverride !== undefined) updateData.classificationOverride = parsed.data.classificationOverride as InsertProject["classificationOverride"];
+  if (parsed.data.liveProductVerified !== undefined) updateData.liveProductVerified = parsed.data.liveProductVerified;
   if (parsed.data.tags !== undefined) updateData.tags = parsed.data.tags;
+
+  if (parsed.data.repoUrl !== undefined) {
+    const coords = parsed.data.repoUrl ? parseGitHubUrl(parsed.data.repoUrl) : null;
+    updateData.githubOwner = coords?.owner ?? null;
+    updateData.githubRepository = coords?.repo ?? null;
+    updateData.aliases = [
+      parsed.data.name ?? "",
+      ...(coords?.repo ? [coords.repo] : []),
+    ].filter(Boolean);
+  }
 
   const [project] = await db
     .update(projectsTable)
@@ -161,6 +349,37 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
     return;
   }
 
+  const force = parsed.data.force === true;
+  let snapshot: Awaited<ReturnType<typeof fetchRepoSnapshot>>;
+  try {
+    snapshot = await fetchRepoSnapshot(githubCoords.owner, githubCoords.repo);
+  } catch (error) {
+    console.error(`[github] Unable to fetch ${githubCoords.owner}/${githubCoords.repo}:`, error);
+    res.status(422).json({ error: "Insufficient repository data." });
+    return;
+  }
+
+  if (!force && project.analyzedCommitSha) {
+    if (snapshot.metadata.latestCommitSha === project.analyzedCommitSha) {
+      await db.update(projectsTable)
+        .set({ latestCommitSha: snapshot.metadata.latestCommitSha, updatedAt: new Date() })
+        .where(eq(projectsTable.id, project.id));
+      res.status(200).json({
+        skipped: true,
+        message: "Repository unchanged. Existing analysis is current.",
+        analyzedCommitSha: project.analyzedCommitSha,
+      });
+      return;
+    }
+    res.status(409).json({
+      code: "REPOSITORY_CHANGED",
+      error: "Repository changed—reanalyze?",
+      latestCommitSha: snapshot.metadata.latestCommitSha,
+      analyzedCommitSha: project.analyzedCommitSha,
+    });
+    return;
+  }
+
   // Create tracking task + set project to analyzing
   const [task] = await db
     .insert(tasksTable)
@@ -174,7 +393,12 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
 
   await db
     .update(projectsTable)
-    .set({ status: "analyzing", updatedAt: new Date() })
+    .set({
+      status: "analyzing",
+      latestCommitSha: snapshot.metadata.latestCommitSha,
+      analysisError: null,
+      updatedAt: new Date(),
+    })
     .where(eq(projectsTable.id, project.id));
 
   await db.insert(auditLogsTable).values({
@@ -199,11 +423,9 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
         .set({ status: "running" })
         .where(eq(tasksTable.id, task.id));
 
-      // Fetch real GitHub data
-      const snapshot = await fetchRepoSnapshot(githubCoords.owner, githubCoords.repo);
-
       // Run full AI Council
       const { findings, verdict } = await runFullCouncil(snapshot, blind);
+       const saleReadiness = buildSaleReadiness(snapshot);
 
       // Persist council findings (one row per role)
       for (const finding of findings) {
@@ -211,6 +433,7 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
           projectId: project.id,
           role: finding.role,
           content: finding.content,
+          commitSha: snapshot.metadata.latestCommitSha,
           confidenceLevel: finding.confidenceLevel,
           governorStatus: "pending",
         });
@@ -221,6 +444,7 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
         projectId: project.id,
         role: "governor",
         content: verdict.content,
+        commitSha: snapshot.metadata.latestCommitSha,
         confidenceLevel: verdict.confidenceLevel,
         governorStatus: "approved",
         governorNote: "Governor self-verified",
@@ -236,6 +460,12 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
           opportunityScore: verdict.opportunityScore,
           estimatedMarketValue: verdict.estimatedMarketValue,
           estimatedBuildCost: verdict.estimatedBuildCost,
+          classification: verdict.classification,
+          analyzedCommitSha: snapshot.metadata.latestCommitSha,
+          lastAnalyzedAt: new Date(),
+          saleReadiness,
+          valuationBasis: verdict.valuationBasis || null,
+          analysisError: null,
           tags: verdict.tags.length > 0 ? verdict.tags : project.tags,
           inferredDescription: verdict.inferredDescription || null,
           primaryLanguage: verdict.primaryLanguage || snapshot.metadata.language || null,
@@ -270,10 +500,13 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
 
       // Determine user-friendly reason
       const isQuota = msg.includes("quota") || msg.includes("billing") || msg.includes("insufficient") || msg.includes("credit") || msg.includes("429") || msg.includes("rate limit");
-      const isEmptyRepo = msg.includes("empty") || msg.includes("409") || msg.includes("Git Repository is empty");
+       const isEmptyRepo = msg.includes("empty") || msg.includes("409") || msg.includes("Git Repository is empty");
+       const isInsufficient = err instanceof InsufficientRepositoryDataError || msg === "Insufficient repository data.";
       const friendlyMsg = isQuota
         ? "OpenAI credit balance is too low to run analysis. Please add credits at platform.openai.com and try again."
-        : isEmptyRepo
+         : isInsufficient
+         ? "Insufficient repository data."
+         : isEmptyRepo
         ? "This repository appears to be empty — no code or commits were found. Add some code and try again."
         : `Analysis failed: ${msg}`;
 
@@ -281,9 +514,10 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
       await db.insert(analysesTable).values({
         projectId: project.id,
         role: "governor",
-        content: `⚠️ ${friendlyMsg}`,
+         content: isInsufficient ? "Insufficient repository data." : `⚠️ ${friendlyMsg}`,
         confidenceLevel: "unknown",
         governorStatus: "pending",
+         commitSha: snapshot.metadata.latestCommitSha,
       });
 
       await db
@@ -293,10 +527,82 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
 
       await db
         .update(projectsTable)
-        .set({ status: "pending", updatedAt: new Date() })
+        .set({ status: "pending", analysisError: friendlyMsg, updatedAt: new Date() })
         .where(eq(projectsTable.id, project.id));
     }
   })();
+});
+
+router.post("/projects/:id/flippa-package", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid project id" });
+    return;
+  }
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (effectiveClassification(project) !== "sell") {
+    res.status(422).json({ error: "Flippa packages can only be generated for SELL projects." });
+    return;
+  }
+  const analyses = await db.select().from(analysesTable)
+    .where(eq(analysesTable.projectId, id))
+    .orderBy(desc(analysesTable.createdAt));
+  const evidence = analyses.map((analysis) => `=== ${analysis.role} ===\n${analysis.content}`).join("\n\n");
+  if (!evidence || evidence.includes("Insufficient repository data.")) {
+    res.status(422).json({ error: "Insufficient repository data." });
+    return;
+  }
+
+  const { default: OpenAI } = await import("openai");
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_tokens: 1600,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `Create a factual Flippa listing package from the supplied repository analysis only.
+Every technical or product claim must cite an exact repository file path in square brackets.
+Separate VERIFIED facts, INFERENCES, and UNKNOWN items.
+Do not claim users, revenue, traffic, deployment, uptime, integrations, or live functionality.
+Do not invent competitors, metrics, or buyer demand. Values are estimates, not appraisals.
+Return JSON with keys: title, shortDescription, listingDescription, highlights (array), whatBuyerGets (array),
+knownRisks (array), evidence (array), unknowns (array), disclosure.
+If the evidence is insufficient, return only a disclosure of "Insufficient repository data." and empty arrays.`,
+      },
+      {
+        role: "user",
+        content: `Project identity: ${project.githubOwner ?? "unknown"}/${project.githubRepository ?? project.name}
+Analyzed commit SHA: ${project.analyzedCommitSha ?? "unknown"}
+Original estimate: ${project.estimatedMarketValue ?? "unknown"} USD
+Sale readiness: ${JSON.stringify(project.saleReadiness ?? {})}
+
+ANALYSIS EVIDENCE:
+${evidence.slice(0, 30000)}`,
+      },
+    ],
+  });
+  let packageData: Record<string, unknown>;
+  try {
+    packageData = JSON.parse(completion.choices[0]?.message?.content ?? "{}");
+  } catch {
+    packageData = { disclosure: "Unable to parse the generated package.", raw: completion.choices[0]?.message?.content ?? "" };
+  }
+  const saved = {
+    ...packageData,
+    generatedAt: new Date().toISOString(),
+    analyzedCommitSha: project.analyzedCommitSha,
+  };
+  const [updated] = await db.update(projectsTable)
+    .set({ flippaPackage: saved, updatedAt: new Date() })
+    .where(eq(projectsTable.id, id))
+    .returning();
+  res.json({ package: saved, project: updated });
 });
 
 // Chat with Kee about a specific project

@@ -14,6 +14,8 @@ export interface Analysis {
   projectId: number;
   role: AnalysisRole;
   content: string;
+  /** @nullable */
+  commitSha?: string | null;
   confidenceLevel: AnalysisConfidenceLevel;
   governorStatus: AnalysisGovernorStatus;
   /** @nullable */

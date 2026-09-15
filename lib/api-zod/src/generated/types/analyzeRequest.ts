@@ -12,4 +12,6 @@ export interface AnalyzeRequest {
   roles?: AnalyzeRequestRolesItem[];
   /** Force blind scan mode ignoring any documentation */
   blind?: boolean;
+  /** Deliberately run again even when the repository SHA is unchanged */
+  force?: boolean;
 }

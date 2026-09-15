@@ -29,7 +29,6 @@ router.get("/dashboard/summary", async (_req, res): Promise<void> => {
       total: count(),
       avgValue: sql<number>`avg(${projectsTable.valueScore})`,
       avgReadiness: sql<number>`avg(${projectsTable.readinessScore})`,
-      totalMarketValue: sql<number>`sum(coalesce(${projectsTable.estimatedMarketValue}, 0))`,
     })
     .from(projectsTable);
 
@@ -73,7 +72,6 @@ router.get("/dashboard/summary", async (_req, res): Promise<void> => {
     analyzedProjects: analyzedCount.count,
     pendingTasks: pendingTaskCount.count,
     vaultEntries: vaultCount.count,
-    totalEstimatedValue: Math.round(projectStats.totalMarketValue ?? 0),
     avgValueScore: projectStats.avgValue != null ? Math.round(Number(projectStats.avgValue) * 10) / 10 : null,
     avgReadinessScore: projectStats.avgReadiness != null ? Math.round(Number(projectStats.avgReadiness) * 10) / 10 : null,
     topProjects,

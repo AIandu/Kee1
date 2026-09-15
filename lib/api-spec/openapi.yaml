@@ -41,6 +41,31 @@ paths:
       operationId: listProjects
       tags: [projects]
       summary: List all projects ranked by value score
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: owner
+          in: query
+          required: false
+          schema: { type: string }
+        - name: classification
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [sell, hold, develop, unreviewed]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, analyzing, analyzed, ready_for_market]
+        - name: minReadiness
+          in: query
+          required: false
+          schema: { type: number }
       responses:
         "200":
           description: List of projects
@@ -490,6 +515,13 @@ components:
           type: string
         repoUrl:
           type: ["string", "null"]
+        githubOwner:
+          type: ["string", "null"]
+        githubRepository:
+          type: ["string", "null"]
+        aliases:
+          type: array
+          items: { type: string }
         description:
           type: ["string", "null"]
         inferredDescription:
@@ -512,6 +544,45 @@ components:
           type: ["integer", "null"]
         estimatedMarketValue:
           type: ["integer", "null"]
+        valueOverride:
+          type: ["integer", "null"]
+        readinessOverride:
+          type: ["integer", "null"]
+        classification:
+          type: string
+          enum: [sell, hold, develop, unreviewed]
+        classificationOverride:
+          type: ["string", "null"]
+          description: Optional Loretta override
+        latestCommitSha:
+          type: ["string", "null"]
+        analyzedCommitSha:
+          type: ["string", "null"]
+        lastAnalyzedAt:
+          type: ["string", "null"]
+          format: date-time
+        analysisError:
+          type: ["string", "null"]
+        liveProductVerified:
+          type: boolean
+        saleReadiness:
+          type: ["object", "null"]
+          additionalProperties: true
+        valuationBasis:
+          type: ["string", "null"]
+        flippaPackage:
+          type: ["object", "null"]
+          additionalProperties: true
+        effectiveValue:
+          type: ["integer", "null"]
+        effectiveReadiness:
+          type: ["integer", "null"]
+        effectiveClassification:
+          type: string
+          enum: [sell, hold, develop, unreviewed]
+        possibleDuplicateIds:
+          type: array
+          items: { type: integer }
         tags:
           type: array
           items:
@@ -564,6 +635,15 @@ components:
           type: integer
         estimatedMarketValue:
           type: integer
+        valueOverride:
+          type: ["integer", "null"]
+        readinessOverride:
+          type: ["integer", "null"]
+        classificationOverride:
+          type: ["string", "null"]
+          description: Optional Loretta override
+        liveProductVerified:
+          type: boolean
         tags:
           type: array
           items:
@@ -581,6 +661,9 @@ components:
         blind:
           type: boolean
           description: Force blind scan mode ignoring any documentation
+        force:
+          type: boolean
+          description: Deliberately run again even when the repository SHA is unchanged
 
     Analysis:
       type: object
@@ -595,6 +678,8 @@ components:
           enum: [researcher, engineering_reviewer, product_analyst, documentation_specialist, market_evaluator, governor]
         content:
           type: string
+        commitSha:
+          type: ["string", "null"]
         confidenceLevel:
           type: string
           enum: [confirmed, inferred, unknown]

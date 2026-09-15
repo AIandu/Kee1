@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRoute, Link } from 'wouter';
 import {
   useGetProject,
@@ -6,106 +6,13 @@ import {
   useAnalyzeProject,
 } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Play, ExternalLink, Github, Loader2, AlertCircle, RefreshCw, Copy, Check, Send, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Play, ExternalLink, Github, Loader2, AlertCircle, RefreshCw, Copy, Check, Download, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import avatarUrl from '@assets/1783969794751_1784416923551.png';
 
-type Tab = 'overview' | 'code' | 'whitepaper' | 'outreach' | 'chat';
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-function ChatPanel({ projectId }: { projectId: number }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: 'Ask me anything about this project — the code, the market, who to pitch, what to fix first. I know it well.' }
-  ]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const send = async () => {
-    const text = input.trim();
-    if (!text || loading) return;
-    const history = messages.slice(1); // skip the welcome message from history
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
-    setInput('');
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${projectId}/chat`, {
-        method: 'POST',
-        body: JSON.stringify({ message: text, history }),
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json() as { reply: string };
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col h-[520px]">
-      <div className="flex-1 overflow-y-auto space-y-4 pr-1 pb-4">
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {msg.role === 'assistant' && (
-              <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 mt-0.5">
-                <img src={avatarUrl} alt="Kee" className="w-full h-full object-cover" />
-              </div>
-            )}
-            <div className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-              msg.role === 'user'
-                ? 'bg-foreground text-background rounded-br-sm'
-                : 'bg-muted text-foreground rounded-bl-sm'
-            }`}>
-              {msg.content}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 mt-0.5">
-              <img src={avatarUrl} alt="Kee" className="w-full h-full object-cover" />
-            </div>
-            <div className="bg-muted rounded-2xl rounded-bl-sm px-4 py-3">
-              <div className="flex gap-1">
-                {[0,1,2].map(i => (
-                  <div key={i} className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce"
-                    style={{ animationDelay: `${i * 0.15}s` }} />
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-      <div className="border-t border-border pt-4 flex gap-2 items-end">
-        <Textarea
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Ask Kee about this project…"
-          className="resize-none min-h-[44px] max-h-32 text-sm"
-          rows={1}
-        />
-        <Button onClick={send} disabled={!input.trim() || loading} size="sm" className="shrink-0 h-10 w-10 p-0">
-          <Send className="w-4 h-4" />
-        </Button>
-      </div>
-    </div>
-  );
-}
+type Tab = 'overview' | 'code' | 'whitepaper' | 'outreach';
 
 function MarkdownBlock({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -136,12 +43,23 @@ export default function ProjectDetail() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [repositoryChanged, setRepositoryChanged] = useState(false);
+  const [flippaLoading, setFlippaLoading] = useState(false);
+  const [flippaPackage, setFlippaPackage] = useState<Record<string, unknown> | null>(null);
 
-  const { data: project, isLoading: projLoading } = useGetProject(projectId, { query: { enabled: !!projectId } });
-  const { data: analyses, isLoading: analysesLoading } = useGetProjectAnalyses(projectId, { query: { enabled: !!projectId } });
+  const { data: project, isLoading: projLoading } = useGetProject(projectId, { query: { queryKey: [`/api/projects/${projectId}`], enabled: !!projectId } });
+  const { data: analyses, isLoading: analysesLoading } = useGetProjectAnalyses(projectId, { query: { queryKey: [`/api/projects/${projectId}/analyses`], enabled: !!projectId } });
   const analyzeMut = useAnalyzeProject();
 
   const isAnalyzing = project?.status === 'analyzing';
+
+  useEffect(() => {
+    if (!projectId || !project?.analyzedCommitSha) return;
+    fetch(`/api/projects/${projectId}/repository-status`)
+      .then(res => res.ok ? res.json() : null)
+      .then((data: { changed?: boolean } | null) => setRepositoryChanged(Boolean(data?.changed)))
+      .catch(() => setRepositoryChanged(false));
+  }, [projectId, project?.analyzedCommitSha]);
 
   useEffect(() => {
     if (!isAnalyzing) return;
@@ -152,9 +70,9 @@ export default function ProjectDetail() {
     return () => clearInterval(id);
   }, [isAnalyzing, projectId, queryClient]);
 
-  const handleAnalyze = () => {
+  const handleAnalyze = (force = Boolean(hasResults)) => {
     analyzeMut.mutate(
-      { id: projectId, data: {} },
+      { id: projectId, data: { force } },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}`] });
@@ -166,6 +84,32 @@ export default function ProjectDetail() {
         },
       }
     );
+  };
+
+  const updateProject = async (data: Record<string, unknown>) => {
+    const res = await fetch(`/api/projects/${projectId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { error?: string }).error ?? 'Update failed');
+    await queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}`] });
+  };
+
+  const generateFlippaPackage = async () => {
+    setFlippaLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/flippa-package`, { method: 'POST' });
+      const data = await res.json() as { package?: Record<string, unknown>; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Unable to generate package');
+      setFlippaPackage(data.package ?? null);
+      await queryClient.invalidateQueries({ queryKey: [`/api/projects/${projectId}`] });
+      toast({ title: 'Flippa package generated', description: 'The draft is limited to repository evidence and includes disclosures.' });
+    } catch (error) {
+      toast({ title: 'Package unavailable', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+    } finally {
+      setFlippaLoading(false);
+    }
   };
 
   const formatCurrency = (val: number | null | undefined) => {
@@ -197,13 +141,15 @@ export default function ProjectDetail() {
 
   const hasResults = (analyses?.length ?? 0) > 0;
   const hasScores = project.valueScore != null;
+  const effectiveValue = project.valueOverride ?? project.valueScore;
+  const effectiveReadiness = project.readinessOverride ?? project.readinessScore;
+  const effectiveClassification = project.classificationOverride ?? project.classification;
 
   const tabs: { id: Tab; label: string; available: boolean }[] = [
     { id: 'overview', label: 'Overview', available: true },
     { id: 'code', label: 'Code Analysis', available: hasResults },
     { id: 'whitepaper', label: 'White Paper', available: !!whitePaper },
     { id: 'outreach', label: 'Outreach', available: !!(outreach || market) },
-    { id: 'chat', label: '💬 Ask Kee', available: true },
   ];
 
   return (
@@ -229,7 +175,7 @@ export default function ProjectDetail() {
             )}
           </div>
           <Button
-            onClick={handleAnalyze}
+             onClick={() => handleAnalyze()}
             disabled={analyzeMut.isPending || isAnalyzing}
             className="shrink-0 gap-2 bg-foreground text-background hover:bg-foreground/90"
           >
@@ -255,6 +201,81 @@ export default function ProjectDetail() {
           </div>
         )}
       </div>
+
+      {repositoryChanged && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-foreground">Repository changed—reanalyze?</p>
+              <p className="text-xs text-muted-foreground mt-1">Kee’s saved analysis belongs to an older commit SHA.</p>
+            </div>
+            <Button size="sm" onClick={() => handleAnalyze(true)} disabled={analyzeMut.isPending || isAnalyzing}>
+              <RefreshCw className="w-3.5 h-3.5 mr-2" /> Re-analyze
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardContent className="p-4 grid sm:grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">GitHub identity</p>
+            <p className="font-mono text-sm">{project.githubOwner && project.githubRepository ? `${project.githubOwner}/${project.githubRepository}` : 'Not linked'}</p>
+            <p className="text-xs text-muted-foreground mt-1">Analyzed SHA: {project.analyzedCommitSha ?? 'none'}</p>
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wider text-muted-foreground block mb-1">Loretta’s classification override</label>
+            <select
+              className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+              value={project.classificationOverride ?? ''}
+              onChange={e => updateProject({ classificationOverride: e.target.value || null }).catch(error =>
+                toast({ title: 'Update failed', description: error instanceof Error ? error.message : String(error), variant: 'destructive' })
+              )}
+            >
+              <option value="">Kee: {project.classification ?? 'unreviewed'}</option>
+              <option value="sell">SELL</option>
+              <option value="hold">HOLD</option>
+              <option value="develop">DEVELOP</option>
+              <option value="unreviewed">UNREVIEWED</option>
+            </select>
+            <p className="text-xs text-muted-foreground mt-1">Effective: <strong>{String(effectiveClassification).toUpperCase()}</strong></p>
+          </div>
+          <label className="sm:col-span-2 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={project.liveProductVerified}
+              onChange={e => updateProject({ liveProductVerified: e.target.checked }).catch(error =>
+                toast({ title: 'Update failed', description: error instanceof Error ? error.message : String(error), variant: 'destructive' })
+              )}
+            />
+            <span><strong>Live product verified</strong> <span className="text-muted-foreground">— manual confirmation; repository analysis cannot prove this.</span></span>
+          </label>
+          <div>
+            <label className="text-xs uppercase tracking-wider text-muted-foreground block mb-1">Value override (USD)</label>
+            <input
+              type="number"
+              defaultValue={project.valueOverride ?? ''}
+              placeholder={project.valueScore == null ? 'No Kee estimate' : String(project.valueScore)}
+              onBlur={e => updateProject({ valueOverride: e.target.value === '' ? null : Number(e.target.value) }).catch(() => undefined)}
+              className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Kee original: {project.estimatedMarketValue == null ? 'none' : formatCurrency(project.estimatedMarketValue)} estimate</p>
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wider text-muted-foreground block mb-1">Readiness override</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              defaultValue={project.readinessOverride ?? ''}
+              placeholder={project.readinessScore == null ? 'No Kee score' : String(project.readinessScore)}
+              onBlur={e => updateProject({ readinessOverride: e.target.value === '' ? null : Number(e.target.value) }).catch(() => undefined)}
+              className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Kee original: {project.readinessScore ?? '—'}/100</p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Analyzing progress */}
       {isAnalyzing && (
@@ -285,8 +306,8 @@ export default function ProjectDetail() {
       {hasScores && (
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: 'Value', value: project.valueScore, color: 'bg-primary' },
-            { label: 'Readiness', value: project.readinessScore, color: 'bg-secondary' },
+            { label: 'Value', value: effectiveValue, color: 'bg-primary' },
+            { label: 'Readiness', value: effectiveReadiness, color: 'bg-secondary' },
             { label: 'Opportunity', value: project.opportunityScore, color: 'bg-foreground' },
           ].map(({ label, value, color }) => (
             <Card key={label}>
@@ -306,8 +327,8 @@ export default function ProjectDetail() {
       {(project.estimatedMarketValue || project.estimatedBuildCost) && (
         <div className="grid grid-cols-3 gap-4 text-center">
           <div>
-            <p className="text-xl font-light text-primary">{formatCurrency(project.estimatedMarketValue)}</p>
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Market Value</p>
+            <p className="text-xl font-light text-primary">{formatCurrency(project.valueOverride ?? project.estimatedMarketValue)}</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Estimated Value</p>
           </div>
           <div>
             <p className="text-xl font-light">{formatCurrency(project.estimatedBuildCost)}</p>
@@ -322,6 +343,61 @@ export default function ProjectDetail() {
             </div>
           ) : <div />}
         </div>
+      )}
+
+      {project.saleReadiness && (
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <ShieldCheck className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold uppercase tracking-wider">Sale-readiness checks</h3>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {Object.entries(project.saleReadiness as Record<string, unknown>)
+                .filter(([key]) => key !== 'requiredBeforeSale')
+                .map(([key, value]) => {
+                  const check = value as { status?: string; note?: string };
+                  return (
+                    <div key={key} className="flex items-start justify-between gap-3 rounded border border-border px-3 py-2">
+                      <div>
+                        <p className="text-xs font-medium">{key.replace(/([A-Z])/g, ' $1')}</p>
+                        <p className="text-[11px] text-muted-foreground">{check.note}</p>
+                      </div>
+                      <span className="text-[10px] uppercase font-mono">{check.status}</span>
+                    </div>
+                  );
+                })}
+            </div>
+            {Array.isArray((project.saleReadiness as Record<string, unknown>).requiredBeforeSale) && (
+              <div className="mt-4">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Required before sale</p>
+                <ul className="list-disc pl-5 text-xs text-muted-foreground space-y-1">
+                  {((project.saleReadiness as Record<string, unknown>).requiredBeforeSale as string[]).map(item => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {effectiveClassification === 'sell' && (
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">Flippa package</h3>
+                <p className="text-xs text-muted-foreground mt-1">Factual draft only. It will cite repository evidence and disclose unknowns.</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={generateFlippaPackage} disabled={flippaLoading}>
+                {flippaLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <Download className="w-3.5 h-3.5 mr-2" />}
+                Generate Flippa Package
+              </Button>
+            </div>
+            {(flippaPackage || project.flippaPackage) && (
+              <MarkdownBlock content={JSON.stringify(flippaPackage ?? project.flippaPackage, null, 2)} />
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Tabs */}
@@ -405,10 +481,6 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {/* Chat tab */}
-          {activeTab === 'chat' && (
-            <ChatPanel projectId={projectId} />
-          )}
         </div>
       )}
 
@@ -423,7 +495,7 @@ export default function ProjectDetail() {
               : 'Add a GitHub URL then run analysis.'}
           </p>
           {project.repoUrl && (
-            <Button onClick={handleAnalyze} disabled={analyzeMut.isPending} size="sm" className="gap-2">
+             <Button onClick={() => handleAnalyze(false)} disabled={analyzeMut.isPending} size="sm" className="gap-2">
               <Play className="w-4 h-4" /> Analyze with Kee
             </Button>
           )}

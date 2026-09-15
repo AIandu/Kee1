@@ -1,6 +1,6 @@
 import { Octokit } from "@octokit/rest";
 
-const githubTokens = [process.env.GITHUB_TOKEN, process.env.GITHUB_TOKEN2].filter(
+const githubTokens = [process.env.GITHUB_TOKEN, process.env.GITHUB_TOKEN2, process.env.GITHUB_2].filter(
   (token): token is string => Boolean(token)
 );
 const githubClients = githubTokens.length

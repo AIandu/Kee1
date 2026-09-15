@@ -3,7 +3,7 @@ import { useGetDashboardSummary, useCreateProject, useListProjects } from '@work
 import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Link, useLocation } from 'wouter';
-import { ArrowUpRight, BarChart3, Briefcase, FileCode2, Plus, Target, Github, Search, Loader2, Lock, Globe } from 'lucide-react';
+import { ArrowUpRight, Briefcase, FileCode2, Plus, Target, Github, Search, Loader2, Lock, Globe, Download } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
@@ -57,6 +57,10 @@ export default function Dashboard() {
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<'pick' | 'form'>('pick');
   const [search, setSearch] = useState('');
+  const [portfolioSearch, setPortfolioSearch] = useState('');
+  const [classificationFilter, setClassificationFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [ownerFilter, setOwnerFilter] = useState('');
   const [form, setForm] = useState({ name: '', repoUrl: '', analysisMode: 'blind', description: '' });
   const { repos, loading: reposLoading, error: reposError, fetch: fetchRepos } = useGithubRepos();
 
@@ -116,6 +120,18 @@ export default function Dashboard() {
     r.fullName.toLowerCase().includes(search.toLowerCase()) ||
     (r.description ?? '').toLowerCase().includes(search.toLowerCase())
   );
+
+  const visibleProjects = (projects ?? []).filter(project => {
+    const searchable = [project.name, project.githubOwner, project.githubRepository, project.description]
+      .filter(Boolean).join(' ').toLowerCase();
+    const classification = project.effectiveClassification ?? project.classification ?? 'unreviewed';
+    return (
+      (!portfolioSearch || searchable.includes(portfolioSearch.toLowerCase())) &&
+      (classificationFilter === 'all' || classification === classificationFilter) &&
+      (statusFilter === 'all' || project.status === statusFilter) &&
+      (!ownerFilter || (project.githubOwner ?? '').toLowerCase().includes(ownerFilter.toLowerCase()))
+    );
+  });
 
   const formatCurrency = (val: number | null | undefined) => {
     if (!val) return '—';
@@ -276,18 +292,7 @@ export default function Dashboard() {
       </header>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex justify-between items-start">
-              <div className="space-y-1">
-                <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Total Value</p>
-                <p className="text-2xl font-light text-primary">{formatCurrency(summary?.totalEstimatedValue)}</p>
-              </div>
-              <div className="p-2 bg-primary/10 rounded-md"><BarChart3 className="w-4 h-4 text-primary" /></div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardContent className="p-6">
             <div className="flex justify-between items-start">
@@ -330,9 +335,44 @@ export default function Dashboard() {
 
       {/* Projects table */}
       <section>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-medium text-foreground">Portfolio</h2>
-          <span className="text-sm text-muted-foreground">Ranked by Value Score</span>
+        <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+          <div>
+            <h2 className="text-lg font-medium text-foreground">Portfolio</h2>
+            <span className="text-sm text-muted-foreground">Original estimates are preserved; overrides are shown as effective values.</span>
+          </div>
+          <div className="flex gap-2">
+            <a href="/api/projects/export?format=csv" className="inline-flex items-center gap-2 border border-border rounded-md px-3 py-2 text-xs hover:bg-muted">
+              <Download className="w-3.5 h-3.5" /> CSV
+            </a>
+            <a href="/api/projects/export?format=json" className="inline-flex items-center gap-2 border border-border rounded-md px-3 py-2 text-xs hover:bg-muted">
+              <Download className="w-3.5 h-3.5" /> JSON
+            </a>
+        </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+          <Input value={portfolioSearch} onChange={e => setPortfolioSearch(e.target.value)} placeholder="Search owner, repository, or project" />
+          <Input value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} placeholder="GitHub owner" />
+          <Select value={classificationFilter} onValueChange={setClassificationFilter}>
+            <SelectTrigger><SelectValue placeholder="Classification" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All classifications</SelectItem>
+              <SelectItem value="sell">SELL</SelectItem>
+              <SelectItem value="hold">HOLD</SelectItem>
+              <SelectItem value="develop">DEVELOP</SelectItem>
+              <SelectItem value="unreviewed">UNREVIEWED</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger><SelectValue placeholder="Analysis status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All analysis statuses</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="analyzing">Analyzing</SelectItem>
+              <SelectItem value="analyzed">Analyzed</SelectItem>
+              <SelectItem value="ready_for_market">Ready for market</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -348,7 +388,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {(projects ?? summary?.topProjects ?? []).map((project, i) => (
+              {visibleProjects.map((project, i) => (
                 <motion.tr
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -358,8 +398,9 @@ export default function Dashboard() {
                   className="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer"
                 >
                   <td className="px-4 py-4 sm:px-6">
-                    <div className="font-medium text-foreground">{project.name}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">{project.primaryLanguage || '—'}</div>
+                     <div className="font-medium text-foreground">{project.name}</div>
+                     <div className="text-xs text-muted-foreground mt-0.5">{project.githubOwner && project.githubRepository ? `${project.githubOwner}/${project.githubRepository}` : project.primaryLanguage || '—'}</div>
+                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">{String(project.effectiveClassification ?? project.classification ?? 'unreviewed')}</div>
                   </td>
                   <td className="px-4 py-4 sm:px-6">
                     <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
@@ -374,8 +415,8 @@ export default function Dashboard() {
                   </td>
                   <td className="hidden sm:table-cell px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono w-6 text-xs">{project.valueScore ?? '—'}</span>
-                      <Progress value={project.valueScore ?? 0} className="w-16 h-1.5" />
+                       <span className="font-mono w-6 text-xs">{project.valueScore ?? '—'}</span>
+                       <Progress value={project.valueScore ?? 0} className="w-16 h-1.5" />
                     </div>
                   </td>
                   <td className="hidden md:table-cell px-6 py-4">
@@ -385,14 +426,14 @@ export default function Dashboard() {
                     </div>
                   </td>
                   <td className="hidden lg:table-cell px-6 py-4 text-right font-mono text-sm">
-                    {formatCurrency(project.estimatedMarketValue)}
+                     <span title="Estimate, not an appraisal">{formatCurrency(project.valueOverride ?? project.estimatedMarketValue)}</span>
                   </td>
                   <td className="px-4 py-4 sm:px-6 text-right">
                     <ArrowUpRight className="w-4 h-4 text-muted-foreground inline-block" />
                   </td>
                 </motion.tr>
               ))}
-              {(summary?.topProjects ?? []).length === 0 && (
+              {visibleProjects.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-6 py-16 text-center">
                     <div className="space-y-3">

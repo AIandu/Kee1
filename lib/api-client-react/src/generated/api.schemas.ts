@@ -27,11 +27,46 @@ export const ProjectAnalysisMode = {
   documented: 'documented',
 } as const;
 
+export type ProjectClassification = typeof ProjectClassification[keyof typeof ProjectClassification];
+
+
+export const ProjectClassification = {
+  sell: 'sell',
+  hold: 'hold',
+  develop: 'develop',
+  unreviewed: 'unreviewed',
+} as const;
+
+/**
+ * @nullable
+ */
+export type ProjectSaleReadiness = { [key: string]: unknown } | null;
+
+/**
+ * @nullable
+ */
+export type ProjectFlippaPackage = { [key: string]: unknown } | null;
+
+export type ProjectEffectiveClassification = typeof ProjectEffectiveClassification[keyof typeof ProjectEffectiveClassification];
+
+
+export const ProjectEffectiveClassification = {
+  sell: 'sell',
+  hold: 'hold',
+  develop: 'develop',
+  unreviewed: 'unreviewed',
+} as const;
+
 export interface Project {
   id: number;
   name: string;
   /** @nullable */
   repoUrl?: string | null;
+  /** @nullable */
+  githubOwner?: string | null;
+  /** @nullable */
+  githubRepository?: string | null;
+  aliases?: string[];
   /** @nullable */
   description?: string | null;
   /** @nullable */
@@ -50,6 +85,37 @@ export interface Project {
   estimatedBuildCost?: number | null;
   /** @nullable */
   estimatedMarketValue?: number | null;
+  /** @nullable */
+  valueOverride?: number | null;
+  /** @nullable */
+  readinessOverride?: number | null;
+  classification?: ProjectClassification;
+  /**
+     * Optional Loretta override
+     * @nullable
+     */
+  classificationOverride?: string | null;
+  /** @nullable */
+  latestCommitSha?: string | null;
+  /** @nullable */
+  analyzedCommitSha?: string | null;
+  /** @nullable */
+  lastAnalyzedAt?: string | null;
+  /** @nullable */
+  analysisError?: string | null;
+  liveProductVerified?: boolean;
+  /** @nullable */
+  saleReadiness?: ProjectSaleReadiness;
+  /** @nullable */
+  valuationBasis?: string | null;
+  /** @nullable */
+  flippaPackage?: ProjectFlippaPackage;
+  /** @nullable */
+  effectiveValue?: number | null;
+  /** @nullable */
+  effectiveReadiness?: number | null;
+  effectiveClassification?: ProjectEffectiveClassification;
+  possibleDuplicateIds?: number[];
   tags?: string[];
   createdAt: string;
   updatedAt: string;
@@ -91,6 +157,16 @@ export interface ProjectUpdate {
   opportunityScore?: number;
   estimatedBuildCost?: number;
   estimatedMarketValue?: number;
+  /** @nullable */
+  valueOverride?: number | null;
+  /** @nullable */
+  readinessOverride?: number | null;
+  /**
+     * Optional Loretta override
+     * @nullable
+     */
+  classificationOverride?: string | null;
+  liveProductVerified?: boolean;
   tags?: string[];
 }
 
@@ -111,6 +187,8 @@ export interface AnalyzeRequest {
   roles?: AnalyzeRequestRolesItem[];
   /** Force blind scan mode ignoring any documentation */
   blind?: boolean;
+  /** Deliberately run again even when the repository SHA is unchanged */
+  force?: boolean;
 }
 
 export type AnalysisRole = typeof AnalysisRole[keyof typeof AnalysisRole];
@@ -148,6 +226,8 @@ export interface Analysis {
   projectId: number;
   role: AnalysisRole;
   content: string;
+  /** @nullable */
+  commitSha?: string | null;
   confidenceLevel: AnalysisConfidenceLevel;
   governorStatus: AnalysisGovernorStatus;
   /** @nullable */
@@ -385,6 +465,34 @@ export interface DailyCompanion {
   pendingApprovals?: number;
   projectsAwaitingAnalysis?: number;
 }
+
+export type ListProjectsParams = {
+q?: string;
+owner?: string;
+classification?: ListProjectsClassification;
+status?: ListProjectsStatus;
+minReadiness?: number;
+};
+
+export type ListProjectsClassification = typeof ListProjectsClassification[keyof typeof ListProjectsClassification];
+
+
+export const ListProjectsClassification = {
+  sell: 'sell',
+  hold: 'hold',
+  develop: 'develop',
+  unreviewed: 'unreviewed',
+} as const;
+
+export type ListProjectsStatus = typeof ListProjectsStatus[keyof typeof ListProjectsStatus];
+
+
+export const ListProjectsStatus = {
+  pending: 'pending',
+  analyzing: 'analyzing',
+  analyzed: 'analyzed',
+  ready_for_market: 'ready_for_market',
+} as const;
 
 export type ListVaultEntriesParams = {
 tag?: string;

@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProjectAnalysisMode } from './projectAnalysisMode';
+import type { ProjectClassification } from './projectClassification';
+import type { ProjectEffectiveClassification } from './projectEffectiveClassification';
+import type { ProjectFlippaPackage } from './projectFlippaPackage';
+import type { ProjectSaleReadiness } from './projectSaleReadiness';
 import type { ProjectStatus } from './projectStatus';
 
 export interface Project {
@@ -13,6 +17,11 @@ export interface Project {
   name: string;
   /** @nullable */
   repoUrl?: string | null;
+  /** @nullable */
+  githubOwner?: string | null;
+  /** @nullable */
+  githubRepository?: string | null;
+  aliases?: string[];
   /** @nullable */
   description?: string | null;
   /** @nullable */
@@ -31,6 +40,37 @@ export interface Project {
   estimatedBuildCost?: number | null;
   /** @nullable */
   estimatedMarketValue?: number | null;
+  /** @nullable */
+  valueOverride?: number | null;
+  /** @nullable */
+  readinessOverride?: number | null;
+  classification?: ProjectClassification;
+  /**
+     * Optional Loretta override
+     * @nullable
+     */
+  classificationOverride?: string | null;
+  /** @nullable */
+  latestCommitSha?: string | null;
+  /** @nullable */
+  analyzedCommitSha?: string | null;
+  /** @nullable */
+  lastAnalyzedAt?: Date | null;
+  /** @nullable */
+  analysisError?: string | null;
+  liveProductVerified?: boolean;
+  /** @nullable */
+  saleReadiness?: ProjectSaleReadiness;
+  /** @nullable */
+  valuationBasis?: string | null;
+  /** @nullable */
+  flippaPackage?: ProjectFlippaPackage;
+  /** @nullable */
+  effectiveValue?: number | null;
+  /** @nullable */
+  effectiveReadiness?: number | null;
+  effectiveClassification?: ProjectEffectiveClassification;
+  possibleDuplicateIds?: number[];
   tags?: string[];
   createdAt: Date;
   updatedAt: Date;

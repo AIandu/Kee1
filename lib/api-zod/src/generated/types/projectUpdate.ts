@@ -17,5 +17,15 @@ export interface ProjectUpdate {
   opportunityScore?: number;
   estimatedBuildCost?: number;
   estimatedMarketValue?: number;
+  /** @nullable */
+  valueOverride?: number | null;
+  /** @nullable */
+  readinessOverride?: number | null;
+  /**
+     * Optional Loretta override
+     * @nullable
+     */
+  classificationOverride?: string | null;
+  liveProductVerified?: boolean;
   tags?: string[];
 }
