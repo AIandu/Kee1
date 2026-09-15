@@ -210,7 +210,7 @@ export default function ProjectDetail() {
     <div className="max-w-4xl mx-auto px-4 py-6 sm:px-8 sm:py-10 space-y-8">
 
       {/* Back */}
-      <Link href="/dashboard" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors gap-1.5">
+      <Link href="/" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors gap-1.5">
         <ArrowLeft className="w-4 h-4" /> Portfolio
       </Link>
 

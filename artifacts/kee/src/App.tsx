@@ -5,10 +5,8 @@ import { Route, Switch, Router as WouterRouter } from 'wouter';
 import { Shell } from '@/components/layout/shell';
 import NotFound from '@/pages/not-found';
 
-import Companion from '@/pages/companion';
 import Dashboard from '@/pages/dashboard';
 import ProjectDetail from '@/pages/project-detail';
-import Vault from '@/pages/vault';
 
 const queryClient = new QueryClient();
 
@@ -16,10 +14,9 @@ function Router() {
   return (
     <Shell>
       <Switch>
-        <Route path="/" component={Companion} />
+        <Route path="/" component={Dashboard} />
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/projects/:id" component={ProjectDetail} />
-        <Route path="/vault" component={Vault} />
         <Route component={NotFound} />
       </Switch>
     </Shell>

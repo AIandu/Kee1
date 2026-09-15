@@ -1,6 +1,11 @@
 import { Octokit } from "@octokit/rest";
 
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+const githubTokens = [process.env.GITHUB_TOKEN, process.env.GITHUB_TOKEN2].filter(
+  (token): token is string => Boolean(token)
+);
+const githubClients = githubTokens.length
+  ? githubTokens.map((token) => new Octokit({ auth: token }))
+  : [new Octokit()];
 
 export function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
   const match = url.match(/github\.com[\/:]([^\/]+)\/([^\/\s#?]+?)(?:\.git)?(?:[\/\s#?]|$)/);
@@ -80,12 +85,13 @@ function shouldSkip(path: string): boolean {
 }
 
 async function fetchFileContent(
+  client: Octokit,
   owner: string,
   repo: string,
   path: string
 ): Promise<string | null> {
   try {
-    const { data } = await octokit.repos.getContent({ owner, repo, path });
+    const { data } = await client.repos.getContent({ owner, repo, path });
     if (Array.isArray(data) || data.type !== "file") return null;
     const content = "content" in data ? data.content : null;
     if (!content) return null;
@@ -96,12 +102,13 @@ async function fetchFileContent(
 }
 
 async function getFileTree(
+  client: Octokit,
   owner: string,
   repo: string,
   branch: string
 ): Promise<string[]> {
   try {
-    const { data } = await octokit.git.getTree({
+    const { data } = await client.git.getTree({
       owner,
       repo,
       tree_sha: branch,
@@ -120,14 +127,30 @@ export async function fetchRepoSnapshot(
   owner: string,
   repo: string
 ): Promise<RepoSnapshot> {
-  // Fetch metadata, languages, commits, and PRs in parallel
-  const [repoData, languagesData, commitsData, prsData] = await Promise.all([
-    octokit.repos.get({ owner, repo }),
-    octokit.repos.listLanguages({ owner, repo }).catch(() => ({ data: {} })),
-    octokit.repos
+  // Try each account so private repos from either GitHub account are accessible.
+  let repoData: Awaited<ReturnType<Octokit["repos"]["get"]>> | null = null;
+  let client: Octokit | null = null;
+  let lastError: unknown;
+  for (const candidate of githubClients) {
+    try {
+      repoData = await candidate.repos.get({ owner, repo });
+      client = candidate;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!repoData || !client) {
+    throw lastError instanceof Error ? lastError : new Error(`Unable to access GitHub repository ${owner}/${repo}`);
+  }
+
+  // Use the account that can see the repo for all subsequent private-repo requests.
+  const [languagesData, commitsData, prsData] = await Promise.all([
+    client.repos.listLanguages({ owner, repo }).catch(() => ({ data: {} })),
+    client.repos
       .listCommits({ owner, repo, per_page: 20 })
       .catch(() => ({ data: [] })),
-    octokit.pulls
+    client.pulls
       .list({ owner, repo, state: "open", per_page: 1 })
       .catch(() => ({ data: [], headers: {} })),
   ]);
@@ -136,7 +159,7 @@ export async function fetchRepoSnapshot(
   const branch = r.default_branch;
 
   // Get file tree
-  const fileTree = await getFileTree(owner, repo, branch);
+  const fileTree = await getFileTree(client, owner, repo, branch);
 
   // Select files to read: priority files first, then top source files
   const prioritized = fileTree
@@ -163,7 +186,7 @@ export async function fetchRepoSnapshot(
   // Fetch file contents in parallel
   const fileResults = await Promise.all(
     toFetch.map(async ({ path }) => {
-      const content = await fetchFileContent(owner, repo, path);
+      const content = await fetchFileContent(client, owner, repo, path);
       return content ? { path, content } : null;
     })
   );
@@ -179,7 +202,7 @@ export async function fetchRepoSnapshot(
   // Get open PR count from Link header or data length
   let openPRs = prsData.data.length;
   try {
-    const fullPRs = await octokit.pulls.list({
+    const fullPRs = await client.pulls.list({
       owner,
       repo,
       state: "open",
@@ -228,20 +251,45 @@ export async function listUserRepos(
     private: boolean;
   }>
 > {
-  const { data } = await octokit.repos.listForAuthenticatedUser({
-    sort: "updated",
-    per_page: perPage,
-    page,
-  });
+  const results = await Promise.allSettled(
+    githubClients.map((client) =>
+      client.repos.listForAuthenticatedUser({
+        sort: "updated",
+        per_page: perPage,
+        page,
+      })
+    )
+  );
 
-  return data.map((r) => ({
-    name: r.name,
-    fullName: r.full_name,
-    url: r.html_url,
-    description: r.description ?? null,
-    language: r.language ?? null,
-    stars: r.stargazers_count ?? 0,
-    updatedAt: r.updated_at ?? "",
-    private: r.private,
-  }));
+  const successful = results
+    .filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<Octokit["repos"]["listForAuthenticatedUser"]>>> =>
+        result.status === "fulfilled"
+    )
+    .flatMap((result) => result.value.data);
+
+  if (successful.length === 0) {
+    const firstFailure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    throw firstFailure?.reason ?? new Error("No GitHub accounts could be accessed");
+  }
+
+  const uniqueRepos = new Map<string, (typeof successful)[number]>();
+  for (const repo of successful) {
+    uniqueRepos.set(repo.full_name, repo);
+  }
+
+  return [...uniqueRepos.values()]
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""))
+    .map((r) => ({
+      name: r.name,
+      fullName: r.full_name,
+      url: r.html_url,
+      description: r.description ?? null,
+      language: r.language ?? null,
+      stars: r.stargazers_count ?? 0,
+      updatedAt: r.updated_at ?? "",
+      private: r.private,
+    }));
 }
