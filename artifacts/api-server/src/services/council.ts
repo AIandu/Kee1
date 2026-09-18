@@ -410,7 +410,8 @@ export async function runFullCouncil(
   ];
   const results: PromiseSettledResult<CouncilFinding>[] = [];
   for (const runRole of roleRunners) {
-    results.push(await Promise.allSettled([runRole()]).then(([result]) => result));
+    const [result] = await Promise.allSettled([runRole()]);
+    results.push(result);
   }
 
   const roles: CouncilRole[] = [
