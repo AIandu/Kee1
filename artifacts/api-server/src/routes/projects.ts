@@ -496,17 +496,33 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
+      const errorDetails = typeof err === "object" && err !== null
+        ? err as { status?: number; code?: string }
+        : {};
+      const status = errorDetails.status;
+      const code = errorDetails.code?.toLowerCase();
       console.error(`[council] Analysis failed for project ${project.id}:`, err);
 
       // Determine user-friendly reason
-      const isQuota = msg.includes("quota") || msg.includes("billing") || msg.includes("insufficient") || msg.includes("credit") || msg.includes("429") || msg.includes("rate limit");
-       const isEmptyRepo = msg.includes("empty") || msg.includes("409") || msg.includes("Git Repository is empty");
-       const isInsufficient = err instanceof InsufficientRepositoryDataError || msg === "Insufficient repository data.";
-      const friendlyMsg = isQuota
-        ? "OpenAI credit balance is too low to run analysis. Please add credits at platform.openai.com and try again."
-         : isInsufficient
-         ? "Insufficient repository data."
-         : isEmptyRepo
+      const isEmptyRepo = msg.includes("empty") || msg.includes("409") || msg.includes("Git Repository is empty");
+      const isInsufficient = err instanceof InsufficientRepositoryDataError || msg === "Insufficient repository data.";
+      const isAuthFailure = status === 401 || code === "invalid_api_key" || msg.toLowerCase().includes("incorrect api key");
+      const isQuota = !isInsufficient && (
+        status === 429 ||
+        code === "insufficient_quota" ||
+        code === "rate_limit_exceeded" ||
+        msg.toLowerCase().includes("quota") ||
+        msg.toLowerCase().includes("billing") ||
+        msg.toLowerCase().includes("credit") ||
+        msg.toLowerCase().includes("rate limit")
+      );
+      const friendlyMsg = isInsufficient
+        ? "Insufficient repository data."
+        : isAuthFailure
+        ? "OpenAI rejected the configured API key. Confirm the current OPENAI_API_KEY secret and restart the API workflow."
+        : isQuota
+        ? "OpenAI rejected the request for quota or rate-limit reasons. Confirm the current key's billing/project access and try again."
+        : isEmptyRepo
         ? "This repository appears to be empty — no code or commits were found. Add some code and try again."
         : `Analysis failed: ${msg}`;
 
