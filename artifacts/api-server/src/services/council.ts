@@ -52,7 +52,7 @@ EVIDENCE GOVERNANCE — NON-NEGOTIABLE:
 `;
 
 function buildContext(snapshot: RepoSnapshot, blind: boolean): string {
-  const fileSection = snapshot.keyFiles
+  const evidenceSection = snapshot.keyFiles
     .map((f) => `--- FILE: ${f.path} ---\n${f.content}`)
     .join("\n\n");
 
@@ -66,7 +66,7 @@ function buildContext(snapshot: RepoSnapshot, blind: boolean): string {
     .map(([l, b]) => `${l}: ${Math.round((b / Object.values(snapshot.languages).reduce((s, v) => s + v, 0)) * 100)}%`)
     .join(", ");
 
-  const meta = blind
+  const metadataSection = blind
     ? `REPOSITORY STATS (blind mode)
 Stars: ${snapshot.metadata.stars} | Forks: ${snapshot.metadata.forks} | Open Issues: ${snapshot.metadata.openIssues} | Open PRs: ${snapshot.openPRs}
 Size: ${snapshot.metadata.size}KB | License: ${snapshot.metadata.license ?? "none"} | Created: ${snapshot.metadata.createdAt.slice(0, 10)} | Last updated: ${snapshot.metadata.updatedAt.slice(0, 10)}
@@ -81,19 +81,21 @@ Created: ${snapshot.metadata.createdAt.slice(0, 10)} | Last updated: ${snapshot.
 Languages: ${langSection}
 File count: ${snapshot.fileTree.length}`;
 
-  return `${meta}
+  return `PRIMARY REPOSITORY EVIDENCE — ACTUAL FILE CONTENTS
+Use this section as the source of truth for technical and product claims. If it does not establish a claim, say UNKNOWN.
+${evidenceSection || "NO FILE CONTENT WAS INGESTED"}
 
-FILE TREE (first 100):
+REPOSITORY FILE TREE (navigation only; not evidence by itself):
 ${snapshot.fileTree.slice(0, 100).join("\n")}
 
-RECENT COMMITS:
+RECENT COMMITS (context only; not proof that code works):
 ${commitSection}
 
-KEY FILE CONTENTS:
-${fileSection}`;
+REPOSITORY METADATA (context only; never use it as technical evidence):
+${metadataSection}`;
 }
 
-async function gpt(system: string, user: string, maxTokens = 2000): Promise<string> {
+async function gpt(system: string, user: string, maxTokens = 8192): Promise<string> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const res = await getOpenAI().chat.completions.create({
@@ -104,7 +106,16 @@ async function gpt(system: string, user: string, maxTokens = 2000): Promise<stri
           { role: "user", content: user },
         ],
       });
-      return res.choices[0]?.message?.content ?? "";
+      const message = res.choices[0]?.message;
+      const content = message?.content?.trim();
+      if (!content) {
+        throw new Error(
+          message?.refusal
+            ? `OpenAI refused the analysis request: ${message.refusal}`
+            : "OpenAI returned an empty analysis response."
+        );
+      }
+      return content;
     } catch (err: unknown) {
       const details = typeof err === "object" && err !== null
         ? err as { status?: number; code?: string; headers?: { get?: (name: string) => string | null } }
@@ -146,7 +157,7 @@ Patterns that will cause problems at scale: duplicated logic, missing error hand
 ## QUICK WINS (under 2 hours each)
 List 3-5 specific, small code fixes that would meaningfully improve the project. For each: exact file, what to change, why it matters.`,
     context,
-    1800
+    8192
   );
   return { role: "researcher", content, confidenceLevel: "confirmed" };
 }
@@ -180,7 +191,7 @@ What would need to change for this to handle 10x users? 100x?
 ## TECHNOLOGY EVALUATION
 Are the technology choices appropriate for the project's goals? Any recommendations to swap?`,
     context,
-    1800
+    8192
   );
   return { role: "engineering_reviewer", content, confidenceLevel: "inferred" };
 }
@@ -229,7 +240,7 @@ Based on the repo's license file if present.
 ---
 Write this as if it will be published on GitHub today. Make it compelling and accurate based on the actual code.`,
     context,
-    1800
+    8192
   );
   return { role: "product_analyst", content, confidenceLevel: "inferred" };
 }
@@ -259,7 +270,7 @@ Write a short, compelling cold email Loretta can send to a potential buyer or pa
 ## RECOMMENDED FIRST STEPS
 The 3 most important actions Loretta should take in the next 30 days to move this project toward a sale or partnership.`,
     context,
-    1300
+    8192
   );
   return { role: "documentation_specialist", content, confidenceLevel: "inferred" };
 }
@@ -304,7 +315,7 @@ Which fits best and why? Be specific about pricing tiers if recommending SaaS.
 ## TIME TO REVENUE
 Realistic timeline with specific milestones.`,
     context,
-    1600
+    8192
   );
   return { role: "market_evaluator", content, confidenceLevel: "inferred" };
 }
@@ -320,6 +331,9 @@ async function runGovernor(
     .filter(f => !f.content.startsWith("[Role unavailable"))
     .map((f) => `=== ${f.role.toUpperCase()} ===\n${f.content}`)
     .join("\n\n");
+  if (!findingsSummary.trim()) {
+    throw new Error("OpenAI returned no role analysis content.");
+  }
 
   const raw = await gpt(
     `You are Kee — a decisive cognitive partner and software intelligence. You have received analysis from your team on a software repository. Synthesize it into an honest executive briefing for Loretta. She is making real business decisions based on what you tell her — do not flatter or inflate.
@@ -346,7 +360,7 @@ Stars: ${snapshot.metadata.stars} | Forks: ${snapshot.metadata.forks} | Size: ${
 TEAM ANALYSIS:
 
 ${findingsSummary}`,
-    1400
+    8192
   );
 
   function extract(key: string): string {

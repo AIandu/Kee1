@@ -63,22 +63,13 @@ export type SaleReadinessReport = {
 
 // Priority file patterns — ordered by importance
 const PRIORITY_PATTERNS = [
-  /^README(\.(md|txt|rst))?$/i,
-  /^package\.json$/,
-  /^requirements\.txt$/,
-  /^go\.mod$/,
-  /^Cargo\.toml$/,
-  /^pyproject\.toml$/,
-  /^setup\.py$/,
-  /^Makefile$/,
-  /^docker-compose\.ya?ml$/,
+  /(^|\/)README(\.(md|txt|rst))?$/i,
+  /(^|\/)package\.json$/,
+  /(^|\/)(requirements\.txt|go\.mod|Cargo\.toml|pyproject\.toml|setup\.py|Makefile)$/,
+  /(^|\/)docker-compose\.ya?ml$/,
   /^\.github\/workflows\/.+\.ya?ml$/i,
-  /^src\/index\.(ts|tsx|js|jsx)$/,
-  /^src\/main\.(ts|tsx|js|jsx|py|go|rs)$/,
-  /^src\/app\.(ts|tsx|js|jsx)$/,
-  /^main\.(py|go|rs|ts|js)$/,
-  /^index\.(py|go|rs|ts|js)$/,
-  /^app\.(py|go|rs|ts|js)$/,
+  /(^|\/)(src|app|server|lib|api)\/(index|main|app|server)\.(ts|tsx|js|jsx|py|go|rs)$/i,
+  /(^|\/)(main|index|app|server)\.(py|go|rs|ts|tsx|js|jsx)$/i,
 ];
 
 const SKIP_PATTERNS = [
@@ -95,8 +86,9 @@ const SKIP_PATTERNS = [
 ];
 
 function priorityScore(path: string): number {
+  const normalized = path.replaceAll("\\", "/");
   for (let i = 0; i < PRIORITY_PATTERNS.length; i++) {
-    if (PRIORITY_PATTERNS[i].test(path)) return PRIORITY_PATTERNS.length - i;
+    if (PRIORITY_PATTERNS[i].test(normalized)) return PRIORITY_PATTERNS.length - i;
   }
   return 0;
 }
@@ -109,10 +101,11 @@ async function fetchFileContent(
   client: Octokit,
   owner: string,
   repo: string,
-  path: string
+  path: string,
+  branch: string
 ): Promise<string | null> {
   try {
-    const { data } = await client.repos.getContent({ owner, repo, path });
+    const { data } = await client.repos.getContent({ owner, repo, path, ref: branch });
     if (Array.isArray(data) || data.type !== "file") return null;
     const content = "content" in data ? data.content : null;
     if (!content) return null;
@@ -207,12 +200,27 @@ export async function fetchRepoSnapshot(
   // Fetch file contents in parallel
   const fileResults = await Promise.all(
     toFetch.map(async ({ path }) => {
-      const content = await fetchFileContent(client, owner, repo, path);
+      const content = await fetchFileContent(client, owner, repo, path, branch);
       return content ? { path, content } : null;
     })
   );
 
-  const keyFiles = fileResults.filter((f): f is RepoFile => f !== null);
+  const maxEvidenceChars = 30_000;
+  let remainingEvidenceChars = maxEvidenceChars;
+  const keyFiles = fileResults
+    .filter((f): f is RepoFile => f !== null)
+    .map((file) => {
+      const content = file.content.slice(0, remainingEvidenceChars);
+      remainingEvidenceChars -= content.length;
+      return { path: file.path, content };
+    })
+    .filter((file) => file.content.trim().length > 0);
+
+  console.info(
+    `[github] Ingested ${owner}/${repo}: ${fileTree.length} files in tree, ` +
+    `${keyFiles.length} files with content, ` +
+    `${maxEvidenceChars - remainingEvidenceChars} evidence characters`
+  );
 
   const recentCommits = commitsData.data.slice(0, 20).map((c) => ({
     message: c.commit.message.split("\n")[0].slice(0, 120),
