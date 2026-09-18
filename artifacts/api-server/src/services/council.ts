@@ -98,15 +98,31 @@ ${fileSection}`;
 }
 
 async function gpt(system: string, user: string, maxTokens = 2000): Promise<string> {
-  const res = await getOpenAI().chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: maxTokens,
-    messages: [
-      { role: "system", content: `${EVIDENCE_RULES}\n${system}` },
-      { role: "user", content: user },
-    ],
-  });
-  return res.choices[0]?.message?.content ?? "";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const res = await getOpenAI().chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: `${EVIDENCE_RULES}\n${system}` },
+          { role: "user", content: user },
+        ],
+      });
+      return res.choices[0]?.message?.content ?? "";
+    } catch (err: unknown) {
+      const details = typeof err === "object" && err !== null
+        ? err as { status?: number; code?: string; headers?: { get?: (name: string) => string | null } }
+        : {};
+      const code = details.code?.toLowerCase();
+      const isRateLimited = details.status === 429 || code === "rate_limit_exceeded";
+      if (!isRateLimited || attempt === 2) throw err;
+
+      const retryAfterMs = Number(details.headers?.get?.("retry-after-ms") ?? 0);
+      const waitMs = Math.min(15000, retryAfterMs > 0 ? retryAfterMs : 2000 * (attempt + 1));
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+  }
+  throw new Error("OpenAI request failed after retries.");
 }
 
 // ─── Role 1: Code Audit ───────────────────────────────────────────────────────
@@ -134,7 +150,7 @@ Patterns that will cause problems at scale: duplicated logic, missing error hand
 ## QUICK WINS (under 2 hours each)
 List 3-5 specific, small code fixes that would meaningfully improve the project. For each: exact file, what to change, why it matters.`,
     context,
-    2500
+    1800
   );
   return { role: "researcher", content, confidenceLevel: "confirmed" };
 }
@@ -168,7 +184,7 @@ What would need to change for this to handle 10x users? 100x?
 ## TECHNOLOGY EVALUATION
 Are the technology choices appropriate for the project's goals? Any recommendations to swap?`,
     context,
-    2500
+    1800
   );
   return { role: "engineering_reviewer", content, confidenceLevel: "inferred" };
 }
@@ -217,7 +233,7 @@ Based on the repo's license file if present.
 ---
 Write this as if it will be published on GitHub today. Make it compelling and accurate based on the actual code.`,
     context,
-    3000
+    1800
   );
   return { role: "product_analyst", content, confidenceLevel: "inferred" };
 }
@@ -247,7 +263,7 @@ Write a short, compelling cold email Loretta can send to a potential buyer or pa
 ## RECOMMENDED FIRST STEPS
 The 3 most important actions Loretta should take in the next 30 days to move this project toward a sale or partnership.`,
     context,
-    2000
+    1300
   );
   return { role: "documentation_specialist", content, confidenceLevel: "inferred" };
 }
@@ -292,7 +308,7 @@ Which fits best and why? Be specific about pricing tiers if recommending SaaS.
 ## TIME TO REVENUE
 Realistic timeline with specific milestones.`,
     context,
-    2200
+    1600
   );
   return { role: "market_evaluator", content, confidenceLevel: "inferred" };
 }
@@ -334,7 +350,7 @@ Stars: ${snapshot.metadata.stars} | Forks: ${snapshot.metadata.forks} | Size: ${
 TEAM ANALYSIS:
 
 ${findingsSummary}`,
-    2000
+    1400
   );
 
   function extract(key: string): string {
@@ -385,13 +401,17 @@ export async function runFullCouncil(
   if (snapshot.fileTree.length === 0 || snapshot.keyFiles.length === 0) {
     throw new InsufficientRepositoryDataError();
   }
-  const results = await Promise.allSettled([
-    runResearcher(snapshot, blind),
-    runEngineeringReviewer(snapshot, blind),
-    runProductAnalyst(snapshot, blind),
-    runDocumentationSpecialist(snapshot, blind),
-    runMarketEvaluator(snapshot, blind),
-  ]);
+  const roleRunners: Array<() => Promise<CouncilFinding>> = [
+    () => runResearcher(snapshot, blind),
+    () => runEngineeringReviewer(snapshot, blind),
+    () => runProductAnalyst(snapshot, blind),
+    () => runDocumentationSpecialist(snapshot, blind),
+    () => runMarketEvaluator(snapshot, blind),
+  ];
+  const results: PromiseSettledResult<CouncilFinding>[] = [];
+  for (const runRole of roleRunners) {
+    results.push(await Promise.allSettled([runRole()]).then(([result]) => result));
+  }
 
   const roles: CouncilRole[] = [
     "researcher",

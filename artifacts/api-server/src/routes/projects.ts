@@ -507,21 +507,26 @@ router.post("/projects/:id/analyze", async (req, res): Promise<void> => {
       const isEmptyRepo = msg.includes("empty") || msg.includes("409") || msg.includes("Git Repository is empty");
       const isInsufficient = err instanceof InsufficientRepositoryDataError || msg === "Insufficient repository data.";
       const isAuthFailure = status === 401 || code === "invalid_api_key" || msg.toLowerCase().includes("incorrect api key");
-      const isQuota = !isInsufficient && (
-        status === 429 ||
-        code === "insufficient_quota" ||
+      const isTokenRateLimit = !isInsufficient && (
         code === "rate_limit_exceeded" ||
+        msg.toLowerCase().includes("tokens per min") ||
+        msg.toLowerCase().includes("rate limit")
+      );
+      const isQuota = !isInsufficient && !isTokenRateLimit && (
+        code === "insufficient_quota" ||
         msg.toLowerCase().includes("quota") ||
         msg.toLowerCase().includes("billing") ||
         msg.toLowerCase().includes("credit") ||
-        msg.toLowerCase().includes("rate limit")
+        status === 429
       );
       const friendlyMsg = isInsufficient
         ? "Insufficient repository data."
         : isAuthFailure
         ? "OpenAI rejected the configured API key. Confirm the current OPENAI_API_KEY secret and restart the API workflow."
+        : isTokenRateLimit
+        ? "OpenAI token rate limit reached, not an exhausted credit balance. Please wait and try again."
         : isQuota
-        ? "OpenAI rejected the request for quota or rate-limit reasons. Confirm the current key's billing/project access and try again."
+        ? "OpenAI reported insufficient quota for this key. Confirm the key's billing/project access and try again."
         : isEmptyRepo
         ? "This repository appears to be empty — no code or commits were found. Add some code and try again."
         : `Analysis failed: ${msg}`;
