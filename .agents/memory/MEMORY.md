@@ -3,3 +3,4 @@
 - [Evidence-first analysis](evidence-first-analysis.md) — cite executable/configuration evidence; unsupported claims and values stay UNKNOWN
 - [OpenAI key rotation](openai-key-rotation.md) — instantiate the direct client per request so rotated secrets are not held by a stale module singleton
 - [OpenAI rate limits](openai-rate-limits.md) — valid credits can still hit organization TPM limits; serialize council calls and distinguish 429 causes
+- [OpenAI model selection](openai-model-selection.md) — Kee uses gpt-5.6-luna with max_completion_tokens across OpenAI surfaces

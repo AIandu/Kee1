@@ -14,6 +14,7 @@ import {
 } from "@workspace/api-zod";
 import { parseGitHubUrl, fetchRepoSnapshot, buildSaleReadiness } from "../services/github.js";
 import { runFullCouncil, InsufficientRepositoryDataError } from "../services/council.js";
+import { getOpenAI, OPENAI_MODEL } from "../services/openai.js";
 
 const router: IRouter = Router();
 
@@ -578,11 +579,10 @@ router.post("/projects/:id/flippa-package", async (req, res): Promise<void> => {
     return;
   }
 
-  const { default: OpenAI } = await import("openai");
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const openai = getOpenAI();
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 1600,
+    model: OPENAI_MODEL,
+    max_completion_tokens: 1600,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -673,12 +673,11 @@ ${codeAudit ? `\nCODE AUDIT (excerpt):\n${codeAudit.content.slice(0, 800)}` : ""
 ${market ? `\nMARKET ANALYSIS (excerpt):\n${market.content.slice(0, 800)}` : ""}
   `.trim();
 
-  const { default: OpenAI } = await import("openai");
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const openai = getOpenAI();
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 800,
+    model: OPENAI_MODEL,
+    max_completion_tokens: 800,
     messages: [
       {
         role: "system",

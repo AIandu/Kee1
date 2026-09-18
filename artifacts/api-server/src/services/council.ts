@@ -1,9 +1,5 @@
-import OpenAI from "openai";
 import type { RepoSnapshot } from "./github.js";
-
-function getOpenAI(): OpenAI {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-}
+import { getOpenAI, OPENAI_MODEL } from "./openai.js";
 
 export type CouncilRole =
   | "researcher"
@@ -101,8 +97,8 @@ async function gpt(system: string, user: string, maxTokens = 2000): Promise<stri
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const res = await getOpenAI().chat.completions.create({
-        model: "gpt-4o",
-        max_tokens: maxTokens,
+        model: OPENAI_MODEL,
+        max_completion_tokens: maxTokens,
         messages: [
           { role: "system", content: `${EVIDENCE_RULES}\n${system}` },
           { role: "user", content: user },
