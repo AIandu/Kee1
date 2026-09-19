@@ -24,6 +24,8 @@ interface GithubRepo {
   private: boolean;
 }
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 function useGithubRepos() {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,7 +35,7 @@ function useGithubRepos() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/github/repos?per_page=100');
+      const res = await fetch(`${API_BASE}/api/github/repos?per_page=100`);
       if (!res.ok) throw new Error(await res.text());
       setRepos(await res.json());
     } catch (e) {
@@ -341,10 +343,10 @@ export default function Dashboard() {
             <span className="text-sm text-muted-foreground">Original estimates are preserved; overrides are shown as effective values.</span>
           </div>
           <div className="flex gap-2">
-            <a href="/api/projects/export?format=csv" className="inline-flex items-center gap-2 border border-border rounded-md px-3 py-2 text-xs hover:bg-muted">
+            <a href={`${API_BASE}/api/projects/export?format=csv`} className="inline-flex items-center gap-2 border border-border rounded-md px-3 py-2 text-xs hover:bg-muted">
               <Download className="w-3.5 h-3.5" /> CSV
             </a>
-            <a href="/api/projects/export?format=json" className="inline-flex items-center gap-2 border border-border rounded-md px-3 py-2 text-xs hover:bg-muted">
+            <a href={`${API_BASE}/api/projects/export?format=json`} className="inline-flex items-center gap-2 border border-border rounded-md px-3 py-2 text-xs hover:bg-muted">
               <Download className="w-3.5 h-3.5" /> JSON
             </a>
         </div>
